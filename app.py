@@ -4,6 +4,7 @@ import math
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
+from branding import render_brand_header
 
 from noise_app.engine import (
     Source,
@@ -145,7 +146,8 @@ def get_center():
 
 init_state()
 
-st.title("🔊 Noise Map Lab · V1")
+render_brand_header()
+
 st.caption(
     "Prototipo educativo de propagación exterior. "
     "No es todavía una implementación ISO 9613-2 validada para uso profesional."
