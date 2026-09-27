@@ -4,4 +4,5 @@ streamlit-folium>=0.23,<1
 numpy>=1.26,<3
 pandas>=2.2,<3
 branca>=0.8,<1
+pillow>=11,<13
 pytest>=8,<9
