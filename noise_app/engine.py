@@ -91,11 +91,7 @@ def segment_intersection(
     q1: tuple[float, float],
     q2: tuple[float, float],
 ) -> tuple[bool, float, float]:
-    """
-    Returns (intersects, t, u), where:
-    P(t) = p1 + t*(p2-p1)
-    Q(u) = q1 + u*(q2-q1)
-    """
+    """Returns (intersects, t, u) for two planar segments."""
     rx, ry = p2[0] - p1[0], p2[1] - p1[1]
     sx, sy = q2[0] - q1[0], q2[1] - q1[1]
     den = _cross(rx, ry, sx, sy)
@@ -123,11 +119,6 @@ def barrier_attenuation_db(
 ) -> float:
     """
     Educational single-edge diffraction approximation.
-
-    1) Check whether the horizontal source-receiver segment crosses the barrier.
-    2) Interpolate the line-of-sight height at the crossing.
-    3) If the barrier top is above LOS, compute path-length difference over its top.
-    4) Convert path difference to a Fresnel-like attenuation approximation.
 
     This is NOT the full ISO 9613-2 barrier algorithm.
     """
@@ -158,9 +149,6 @@ def barrier_attenuation_db(
 
     wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
     fresnel_n = max(0.0, 2.0 * delta / wavelength)
-
-    # Stable teaching approximation: gives ~4.8 dB as N→0+,
-    # increases with path difference, and is capped by settings.
     attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
     return min(max_barrier_db, max(0.0, attenuation))
 
@@ -188,7 +176,6 @@ def source_to_point_breakdown(
     a_div = geometric_divergence_db(distance_m)
     a_atm = atmospheric_absorption_db(distance_m, settings.alpha_db_per_km)
 
-    active_barriers = [b for b in barriers if b.enabled]
     barrier_losses = [
         barrier_attenuation_db(
             sx, sy, source.height_m,
@@ -197,9 +184,9 @@ def source_to_point_breakdown(
             frequency_hz=settings.frequency_hz,
             max_barrier_db=settings.max_barrier_db,
         )
-        for b in active_barriers
+        for b in barriers
+        if b.enabled
     ]
-    # Multiple barriers are not simply additive. V1 uses the strongest active screen.
     a_bar = max(barrier_losses, default=0.0)
 
     lp = source.lw_db + source.dc_db - a_div - a_atm - a_bar
@@ -256,3 +243,51 @@ def build_grid(
             lat, lon = xy_to_latlon(float(x), float(y), center_lat, center_lon)
             coords.append((lat, lon, float(x), float(y)))
     return coords
+
+
+def polygon_bounds(polygon: list[list[float]]) -> tuple[float, float, float, float]:
+    """Return south, west, north, east for [lat, lon] polygon vertices."""
+    lats = [p[0] for p in polygon]
+    lons = [p[1] for p in polygon]
+    return min(lats), min(lons), max(lats), max(lons)
+
+
+def point_in_polygon(lat: float, lon: float, polygon: list[list[float]]) -> bool:
+    """Ray-casting inclusion test. Polygon vertices use [lat, lon]."""
+    x = lon
+    y = lat
+    inside = False
+    n = len(polygon)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        yi, xi = polygon[i]
+        yj, xj = polygon[j]
+        if (yi > y) != (yj > y):
+            denom = (yj - yi) if abs(yj - yi) > 1e-15 else 1e-15
+            x_cross = (xj - xi) * (y - yi) / denom + xi
+            if x < x_cross:
+                inside = not inside
+        j = i
+    return inside
+
+
+def build_grid_from_polygon(
+    polygon: list[list[float]],
+    points_per_side: int,
+) -> tuple[list[tuple[float, float]], list[bool], tuple[float, float, float, float]]:
+    """Create a regular lat/lon raster grid over a user-drawn polygon bounding box."""
+    south, west, north, east = polygon_bounds(polygon)
+    n = int(max(12, min(points_per_side, 90)))
+    lats = np.linspace(south, north, n)
+    lons = np.linspace(west, east, n)
+
+    points: list[tuple[float, float]] = []
+    mask: list[bool] = []
+    for lat in lats:
+        for lon in lons:
+            latf, lonf = float(lat), float(lon)
+            points.append((latf, lonf))
+            mask.append(point_in_polygon(latf, lonf, polygon))
+    return points, mask, (south, west, north, east)
