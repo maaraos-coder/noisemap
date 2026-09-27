@@ -499,14 +499,14 @@ function App() {
 
       <header className="brand-bar">
         <div className="brand-left">
-          <img src="/logo_uc.png" alt="Pontificia Universidad Católica de Chile" />
+          <img src="https://raw.githubusercontent.com/maaraos-coder/noisemap/main/assets/logo_uc.png" alt="Pontificia Universidad Católica de Chile" />
         </div>
         <div className="brand-center">
           <strong>DIPLOMADO EN ACÚSTICA DE LA EDIFICACIÓN</strong>
           <span>Noise Map Lab</span>
         </div>
         <div className="brand-right">
-          <img src="/logo_decon_uc.png" alt="DECON UC" />
+          <img src="https://raw.githubusercontent.com/maaraos-coder/noisemap/main/assets/logo_decon_uc.png" alt="DECON UC" />
         </div>
       </header>
 
