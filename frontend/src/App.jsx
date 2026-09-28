@@ -976,6 +976,42 @@ function App() {
             setMode('area')
           }} />
           <IconButton active={mode === 'edit-area'} title="Editar área de cálculo" icon="◇" label="Editar" onClick={() => setMode('edit-area')} />
+          {mode === 'contour' && contourDraft.length >= 2 && (
+            <button
+              type="button"
+              className="bottom-context-action finish"
+              onClick={finishContour}
+              title="Finalizar curva de nivel"
+            >
+              <span className="context-icon">✓</span>
+              <span>Finalizar curva</span>
+            </button>
+          )}
+
+          {mode === 'area' && draftPolygon.length >= 3 && (
+            <button
+              type="button"
+              className="bottom-context-action finish"
+              onClick={finishArea}
+              title="Cerrar área de cálculo"
+            >
+              <span className="context-icon">✓</span>
+              <span>Cerrar área</span>
+            </button>
+          )}
+
+          {(mode === 'contour' || mode === 'area' || barrierStart || lineStart) && (
+            <button
+              type="button"
+              className="bottom-context-action cancel"
+              onClick={cancelDrawing}
+              title="Cancelar dibujo actual"
+            >
+              <span className="context-icon">×</span>
+              <span>Cancelar</span>
+            </button>
+          )}
+
           <button
             type="button"
             className={`bottom-calculate ${dirty ? 'dirty' : 'clean'}`}
@@ -999,23 +1035,6 @@ function App() {
           )}
         </div>
 
-        {mode === 'contour' && contourDraft.length >= 2 && (
-          <div className="object-toolbar-confirm contour-confirm">
-            <button className="tool-action" onClick={finishContour}>Finalizar curva</button>
-          </div>
-        )}
-
-        {mode === 'area' && draftPolygon.length >= 3 && (
-          <div className="object-toolbar-confirm">
-            <button className="tool-action" onClick={finishArea}>Cerrar área</button>
-          </div>
-        )}
-
-        {(mode === 'area' || mode === 'contour' || barrierStart || lineStart) && (
-          <div className="object-toolbar-confirm">
-            <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
-          </div>
-        )}
       </div>
 
       <div className="utility-toolbar">
