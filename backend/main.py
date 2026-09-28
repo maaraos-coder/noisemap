@@ -570,11 +570,32 @@ def calculate(payload: CalculationRequest):
             lat0,
             lon0,
         )
+        contributions = []
+        for source_model, source_input in zip(sources, payload.sources):
+            if not source_model.enabled:
+                continue
+            source_level = level_at_point(
+                [source_model],
+                receiver.lat,
+                receiver.lon,
+                receiver.height_m,
+                barriers,
+                settings,
+                lat0,
+                lon0,
+            )
+            contributions.append({
+                "source_id": source_input.id,
+                "source_name": source_input.name,
+                "level_db": round(float(source_level), 2) if np.isfinite(source_level) else None,
+            })
+
         receiver_results.append({
             "id": receiver.id,
             "name": receiver.name,
             "height_m": receiver.height_m,
             "level_db": round(float(level), 2) if np.isfinite(level) else None,
+            "contributions": contributions,
         })
 
     return CalculationResponse(
