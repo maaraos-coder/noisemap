@@ -540,6 +540,82 @@ select {
   background: #0b63ce;
 }
 
+
+.area-draft-vertex {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #0b63ce;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(11,99,206,.45), 0 3px 10px rgba(0,0,0,.28);
+  font-size: 10px;
+  font-weight: 900;
+  pointer-events: auto;
+}
+
+.area-draft-vertex.first {
+  width: 30px;
+  height: 30px;
+  background: #2f8a51;
+  box-shadow: 0 0 0 3px rgba(47,138,81,.30), 0 3px 12px rgba(0,0,0,.30);
+}
+
+.area-draft-vertex.first b {
+  position: absolute;
+  left: 50%;
+  top: -21px;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(24,37,50,.92);
+  color: #fff;
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.area-drawing-guide {
+  position: absolute;
+  z-index: 33;
+  left: 50%;
+  top: 112px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: min(430px, calc(100vw - 150px));
+  padding: 8px 12px;
+  border: 1px solid rgba(11,99,206,.25);
+  border-radius: 8px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 6px 16px rgba(18,39,61,.16);
+  color: #314457;
+  pointer-events: none;
+}
+
+.area-drawing-guide strong {
+  color: #0b63ce;
+  font-size: 10px;
+}
+
+.area-drawing-guide span {
+  font-size: 9px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .area-drawing-guide {
+    top: 96px;
+    max-width: calc(100vw - 24px);
+  }
+}
+
 .object-card {
   position: absolute;
   z-index: 25;
