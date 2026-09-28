@@ -262,7 +262,7 @@ function App() {
   const [calculating, setCalculating] = useState(false)
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const [layers, setLayers] = useState({
     raster: true,
@@ -754,72 +754,94 @@ function App() {
           <img src="https://raw.githubusercontent.com/maaraos-coder/noisemap/main/assets/logo_uc.png" alt="Pontificia Universidad Católica de Chile" />
         </div>
         <div className="brand-center">
-          <strong>DIPLOMADO EN ACÚSTICA DE LA EDIFICACIÓN</strong>
-          <span>Noise Map Lab</span>
+          <strong>HERRAMIENTA DE MAPA DE RUIDO</strong>
+          <span>Diplomado en Acústica de la Edificación</span>
         </div>
         <div className="brand-right">
           <img src="https://raw.githubusercontent.com/maaraos-coder/noisemap/main/assets/logo_decon_uc.png" alt="DECON UC" />
         </div>
       </header>
 
-      <div className="map-toolbar">
-        <IconButton active={mode === 'navigate'} title="Navegar por el mapa" icon="✥" label="Navegar" onClick={() => setMode('navigate')} />
-        <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
-        <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
-        <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="╱" label="Barrera" onClick={() => setMode('barrier')} />
-        <IconButton active={mode === 'line'} title="Agregar línea auxiliar de medición" icon="⌇" label="Línea" onClick={() => setMode('line')} />
-        <IconButton active={mode === 'area'} title="Dibujar nueva área de cálculo" icon="▱" label="Área" onClick={() => {
-          setDraftPolygon([])
-          setMode('area')
-        }} />
-        <IconButton active={mode === 'edit-area'} title="Editar vértices del área de cálculo" icon="◇" label="Editar área" onClick={() => setMode('edit-area')} />
-
-        <div className="toolbar-divider" />
-
-        <button
-          className={`tool-button ${searchOpen ? 'active' : ''}`}
-          type="button"
-          title="Buscar dirección o coordenadas"
-          onClick={() => setSearchOpen(v => !v)}
-        >
-          <span className="tool-icon">⌕</span>
-          <span className="tool-label">Buscar</span>
-        </button>
-
-        <button
-          className={`tool-button ${settingsOpen ? 'active' : ''}`}
-          type="button"
-          title="Configuración global"
-          onClick={() => setSettingsOpen(v => !v)}
-        >
-          <span className="tool-icon">⚙</span>
-          <span className="tool-label">General</span>
-        </button>
-
-        <button
-          className={`tool-button layer-button ${layersOpen ? 'active' : ''}`}
-          type="button"
-          title="Capas visibles"
-          onClick={() => setLayersOpen(v => !v)}
-        >
-          <span className="tool-icon">☷</span>
-          <span className="tool-label">Capas</span>
-        </button>
+      <div className="object-toolbar">
+        <div className="object-toolbar-title">Agregar objetos</div>
+        <div className="object-toolbar-actions">
+          <IconButton active={mode === 'navigate'} title="Seleccionar / navegar" icon="✥" label="Seleccionar" onClick={() => setMode('navigate')} />
+          <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
+          <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
+          <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
+          <IconButton active={mode === 'line'} title="Agregar línea auxiliar" icon="⌇" label="Línea" onClick={() => setMode('line')} />
+          <IconButton active={mode === 'area'} title="Dibujar área de cálculo" icon="▱" label="Área" onClick={() => {
+            setDraftPolygon([])
+            setMode('area')
+          }} />
+          <IconButton active={mode === 'edit-area'} title="Editar área de cálculo" icon="◇" label="Editar" onClick={() => setMode('edit-area')} />
+        </div>
 
         {mode === 'area' && draftPolygon.length >= 3 && (
-          <button className="tool-action" onClick={finishArea}>Cerrar área</button>
+          <div className="object-toolbar-confirm">
+            <button className="tool-action" onClick={finishArea}>Cerrar área</button>
+          </div>
         )}
 
         {(mode === 'area' || barrierStart || lineStart) && (
-          <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
-        )}
-
-        {dirty && result && (
-          <div className="dirty-chip" title="Hay cambios que aún no están reflejados en el mapa calculado">
-            ● Cambios sin calcular
+          <div className="object-toolbar-confirm">
+            <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
           </div>
         )}
       </div>
+
+      <div className="utility-toolbar">
+        <button
+          type="button"
+          className={searchOpen ? 'active' : ''}
+          title="Buscar dirección o coordenadas"
+          onClick={() => {
+            setSearchOpen(v => !v)
+            setSettingsOpen(false)
+            setLayersOpen(false)
+          }}
+        >
+          <span>⌕</span><small>Buscar</small>
+        </button>
+        <button
+          type="button"
+          className={layersOpen ? 'active' : ''}
+          title="Capas del mapa"
+          onClick={() => {
+            setLayersOpen(v => !v)
+            setSearchOpen(false)
+            setSettingsOpen(false)
+          }}
+        >
+          <span>☷</span><small>Capas</small>
+        </button>
+        <button
+          type="button"
+          className={panelOpen ? 'active' : ''}
+          title="Modelo acústico"
+          onClick={() => setPanelOpen(v => !v)}
+        >
+          <span>≋</span><small>Modelo</small>
+        </button>
+        <button
+          type="button"
+          className={settingsOpen ? 'active' : ''}
+          title="Configuración global"
+          onClick={() => {
+            setSettingsOpen(v => !v)
+            setSearchOpen(false)
+            setLayersOpen(false)
+          }}
+        >
+          <span>⚙</span><small>General</small>
+        </button>
+      </div>
+
+      {dirty && result && (
+        <div className="dirty-chip floating-dirty" title="Hay cambios que aún no están reflejados en el mapa calculado">
+          ● Cambios sin calcular
+        </div>
+      )}
 
       {layersOpen && (
         <div className="layers-popover">
@@ -973,11 +995,7 @@ function App() {
         </div>
       )}
 
-      <aside className={`control-panel ${panelOpen ? '' : 'collapsed'}`}>
-        <button className="panel-toggle" onClick={() => setPanelOpen(x => !x)}>
-          {panelOpen ? '‹' : '›'}
-        </button>
-
+      <aside className={`control-panel ${panelOpen ? 'open' : 'closed'}`}>
         {panelOpen && (
           <>
             <div className="panel-heading">
