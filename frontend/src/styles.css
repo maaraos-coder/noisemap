@@ -2415,3 +2415,21 @@ select {
     overflow-y: auto !important;
   }
 }
+
+
+.profile-save-map-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #0b63ce;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.profile-save-map-button:hover {
+  background: #0957b6;
+}
