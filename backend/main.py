@@ -79,6 +79,7 @@ def _settings_for_band(base, band_hz: float) -> PropagationSettings:
         max_barrier_db=base.max_barrier_db,
         temperature_c=base.temperature_c,
         humidity_pct=base.humidity_pct,
+        ground_factor=base.ground_factor,
     )
 
 
@@ -91,8 +92,17 @@ def _source_spectral_result(
     base_settings,
     lat0: float,
     lon0: float,
+    terrain_samples=None,
+    receiver_ground_elevation_m: Optional[float] = None,
 ):
     adjustment = _source_adjustment_db(source_input)
+    source_ground_elevation_m = _terrain_elevation(
+        terrain_samples, source_input.lat, source_input.lon, lat0, lon0
+    )
+    if receiver_ground_elevation_m is None:
+        receiver_ground_elevation_m = _terrain_elevation(
+            terrain_samples, receiver_lat, receiver_lon, lat0, lon0
+        )
     mode = (source_input.spectrum_mode or "broadband").lower()
 
     if mode == "octaves":
@@ -112,6 +122,7 @@ def _source_spectral_result(
                 lw_db=lw + adjustment,
                 dc_db=source_input.dc_db,
                 enabled=source_input.enabled,
+                ground_elevation_m=source_ground_elevation_m,
             )
             band_settings = _settings_for_band(base_settings, band)
             lp = level_at_point(
@@ -123,6 +134,7 @@ def _source_spectral_result(
                 band_settings,
                 lat0,
                 lon0,
+                receiver_ground_elevation_m=receiver_ground_elevation_m,
             )
             if np.isfinite(lp):
                 bands_db[str(band)] = round(float(lp), 3)
@@ -149,6 +161,7 @@ def _source_spectral_result(
             lw_db=float(source_input.lw_db) + adjustment,
             dc_db=source_input.dc_db,
             enabled=source_input.enabled,
+            ground_elevation_m=source_ground_elevation_m,
         )
         band_settings = _settings_for_band(base_settings, frequency)
         lp = level_at_point(
@@ -160,6 +173,7 @@ def _source_spectral_result(
             band_settings,
             lat0,
             lon0,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
         nearest_band = min(OCTAVE_BANDS, key=lambda b: abs(b - frequency))
         if np.isfinite(lp):
@@ -188,6 +202,7 @@ def _source_spectral_result(
         lw_db=float(source_input.lw_db) + adjustment,
         dc_db=source_input.dc_db,
         enabled=source_input.enabled,
+        ground_elevation_m=source_ground_elevation_m,
     )
     broadband_settings = PropagationSettings(
         alpha_db_per_km=base_settings.alpha_db_per_km,
@@ -195,6 +210,7 @@ def _source_spectral_result(
         max_barrier_db=base_settings.max_barrier_db,
         temperature_c=base_settings.temperature_c,
         humidity_pct=base_settings.humidity_pct,
+        ground_factor=base_settings.ground_factor,
     )
     lp = level_at_point(
         [source_model],
@@ -205,6 +221,7 @@ def _source_spectral_result(
         broadband_settings,
         lat0,
         lon0,
+        receiver_ground_elevation_m=receiver_ground_elevation_m,
     )
     return {
         "total_db": float(lp) if np.isfinite(lp) else None,
@@ -222,6 +239,8 @@ def _combined_spectral_level_at_point(
     base_settings,
     lat0,
     lon0,
+    terrain_samples=None,
+    receiver_ground_elevation_m: Optional[float] = None,
 ):
     totals = []
     for source_input in source_inputs:
@@ -236,6 +255,8 @@ def _combined_spectral_level_at_point(
             base_settings,
             lat0,
             lon0,
+            terrain_samples=terrain_samples,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
         if result["total_db"] is not None and np.isfinite(result["total_db"]):
             totals.append(result["total_db"])
@@ -560,10 +581,18 @@ class GridSettings(BaseModel):
     reflections_enabled: bool = False
 
 
+class ContourIn(BaseModel):
+    id: Optional[str] = None
+    name: str = "Curva"
+    elevation_m: float = 0.0
+    points: List[List[float]] = []
+
+
 class CalculationRequest(BaseModel):
     sources: List[SourceIn]
     receivers: List[ReceiverIn] = []
     barriers: List[BarrierIn] = []
+    contours: List[ContourIn] = []
     polygon: List[List[float]]
     settings: GridSettings = GridSettings()
 
@@ -572,6 +601,7 @@ class BarrierProfileRequest(BaseModel):
     source: SourceIn
     receiver: ReceiverIn
     barrier: BarrierIn
+    contours: List[ContourIn] = []
     settings: GridSettings = GridSettings()
 
 
@@ -579,7 +609,53 @@ class ReceiverPreviewRequest(BaseModel):
     sources: List[SourceIn] = []
     receiver: ReceiverIn
     barriers: List[BarrierIn] = []
+    contours: List[ContourIn] = []
     settings: GridSettings = GridSettings()
+
+
+def _build_terrain_samples(contours, lat0: float, lon0: float):
+    samples = []
+    for contour in contours or []:
+        points = contour.points or []
+        if not points:
+            continue
+        # Keep long imported contours responsive while retaining their shape.
+        stride = max(1, math.ceil(len(points) / 250))
+        for point in points[::stride]:
+            if len(point) < 2:
+                continue
+            x, y = latlon_to_xy(float(point[0]), float(point[1]), lat0, lon0)
+            samples.append((x, y, float(contour.elevation_m)))
+
+    if not samples:
+        return None
+
+    if len(samples) > 4000:
+        step = math.ceil(len(samples) / 4000)
+        samples = samples[::step]
+
+    arr = np.asarray(samples, dtype=float)
+    return arr[:, 0], arr[:, 1], arr[:, 2]
+
+
+def _terrain_elevation(samples, lat: float, lon: float, lat0: float, lon0: float) -> float:
+    if samples is None:
+        return 0.0
+
+    xs, ys, zs = samples
+    if len(zs) == 0:
+        return 0.0
+
+    x, y = latlon_to_xy(float(lat), float(lon), lat0, lon0)
+    dist2 = (xs - x) ** 2 + (ys - y) ** 2
+    nearest = int(np.argmin(dist2))
+    if dist2[nearest] < 0.25:
+        return float(zs[nearest])
+
+    k = min(12, len(zs))
+    idx = np.argpartition(dist2, k - 1)[:k] if k < len(zs) else np.arange(len(zs))
+    weights = 1.0 / np.maximum(dist2[idx], 1.0)
+    return float(np.sum(weights * zs[idx]) / np.sum(weights))
 
 
 class CalculationResponse(BaseModel):
@@ -731,6 +807,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         max_barrier_db=payload.settings.max_barrier_db,
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
+        ground_factor=payload.settings.ground_factor,
     )
     settings.a_weighting = payload.settings.a_weighting
 
@@ -982,6 +1059,7 @@ def calculate(payload: CalculationRequest):
         max_barrier_db=payload.settings.max_barrier_db,
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
+        ground_factor=payload.settings.ground_factor,
     )
     settings.a_weighting = payload.settings.a_weighting
 
