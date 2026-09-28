@@ -62,3 +62,6 @@ VITE_API_BASE_URL=https://TU-BACKEND
 ## Alcance acústico
 
 La V3 cambia principalmente la experiencia de usuario y conserva el motor educativo existente. Todavía no es una implementación completa y validada de ISO 9613-2.
+
+
+<!-- Deployment trigger: Vercel production branch -->
