@@ -1549,3 +1549,111 @@ select {
     min-width: 84px;
   }
 }
+
+
+/* Topography import */
+.topo-import-dialog {
+  top: 112px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 120px));
+  padding: 16px;
+}
+
+.topo-format-note {
+  margin-bottom: 10px;
+  color: #4f5e6c;
+  font-size: 11px;
+}
+
+.topo-file-field,
+.topo-import-grid label {
+  display: block;
+  color: #526171;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.topo-file-field input,
+.topo-import-grid input {
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px 9px;
+  border: 1px solid #cbd5df;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.topo-import-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.topo-help {
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: #f6f8fa;
+  border: 1px solid #e0e6ec;
+  color: #677482;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.topo-import-button {
+  width: 100%;
+  margin-top: 11px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #0b63ce;
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.topo-import-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.topo-import-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.topo-import-result.success {
+  background: #eef8f2;
+  border: 1px solid #cfe8d8;
+  color: #2c6541;
+}
+
+.topo-import-result.error {
+  background: #fff1f1;
+  border: 1px solid #f0cccc;
+  color: #9f3030;
+}
+
+.topo-import-result small {
+  margin-top: 3px;
+  color: inherit;
+  opacity: .88;
+}
+
+@media (max-width: 900px) {
+  .topo-import-dialog {
+    top: 92px;
+    width: min(360px, calc(100vw - 88px));
+  }
+
+  .topo-import-grid {
+    grid-template-columns: 1fr;
+  }
+}
