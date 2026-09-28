@@ -1055,6 +1055,68 @@ function App() {
     )
   }
 
+  const normalizePhotonResults = payload => {
+    return (payload?.features || []).map(feature => {
+      const coordinates = feature?.geometry?.coordinates || []
+      const props = feature?.properties || {}
+      if (coordinates.length < 2) return null
+
+      const parts = []
+      const house = props.housenumber
+      const street = props.street || props.name
+      if (street) parts.push(house ? `${street} ${house}` : String(street))
+      for (const key of ['district', 'city', 'county', 'state', 'country']) {
+        const value = props[key]
+        if (value && !parts.includes(String(value))) parts.push(String(value))
+      }
+
+      return {
+        display_name: parts.join(', ') || 'Resultado de búsqueda',
+        lat: Number(coordinates[1]),
+        lon: Number(coordinates[0]),
+        type: props.type || ''
+      }
+    }).filter(item => item && Number.isFinite(item.lat) && Number.isFinite(item.lon))
+  }
+
+  const searchLocationDirectly = async query => {
+    // Browser-side fallback: keeps location search working even if Render
+    // cannot reach the external geocoding providers.
+    const providers = [
+      async () => {
+        const response = await fetch(
+          `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=8&lang=es`
+        )
+        if (!response.ok) throw new Error(`Photon HTTP ${response.status}`)
+        return normalizePhotonResults(await response.json())
+      },
+      async () => {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&q=${encodeURIComponent(query)}`,
+          { headers: { 'Accept-Language': 'es' } }
+        )
+        if (!response.ok) throw new Error(`Nominatim HTTP ${response.status}`)
+        const payload = await response.json()
+        return payload.map(item => ({
+          display_name: item.display_name || 'Resultado de búsqueda',
+          lat: Number(item.lat),
+          lon: Number(item.lon),
+          type: item.type || ''
+        })).filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lon))
+      }
+    ]
+
+    for (const provider of providers) {
+      try {
+        const results = await provider()
+        if (results.length) return results.slice(0, 5)
+      } catch (error) {
+        console.debug('Geocodificador directo no disponible:', error)
+      }
+    }
+    return []
+  }
+
   const runSearch = async () => {
     const q = searchText.trim()
     if (!q) {
@@ -1077,28 +1139,37 @@ function App() {
 
     setSearching(true)
     setLocationMessage('Buscando ubicación…')
+
+    let results = []
+    let backendFailed = false
+
     try {
       const response = await fetch(`${API_BASE}/api/geocode?q=${encodeURIComponent(q)}`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
-      const results = data.results || []
-      setSearchResults(results)
-
-      if (results[0]) {
-        goToLocation(results[0].lat, results[0].lon, 17)
-        setLocationMessage('Selecciona un resultado para comenzar a trabajar en ese lugar.')
-      } else if (data.service_error) {
-        setLocationMessage('El servicio de búsqueda no está respondiendo en este momento. Puedes intentar nuevamente o pegar coordenadas GPS.')
-      } else {
-        setLocationMessage('No se encontraron resultados. Prueba agregando ciudad y país, por ejemplo: “San Francisco 335, Santiago, Chile”.')
-      }
+      results = data.results || []
+      backendFailed = Boolean(data.service_error)
     } catch (error) {
-      console.error(error)
-      setSearchResults([])
-      setLocationMessage('No fue posible buscar la dirección en este momento.')
-    } finally {
-      setSearching(false)
+      console.debug('Búsqueda backend no disponible:', error)
+      backendFailed = true
     }
+
+    if (!results.length) {
+      results = await searchLocationDirectly(q)
+    }
+
+    setSearchResults(results)
+
+    if (results[0]) {
+      goToLocation(results[0].lat, results[0].lon, 17)
+      setLocationMessage('Selecciona un resultado para comenzar a trabajar en ese lugar.')
+    } else if (backendFailed) {
+      setLocationMessage('No fue posible consultar los buscadores geográficos. Puedes intentar nuevamente o pegar coordenadas GPS.')
+    } else {
+      setLocationMessage('No se encontraron resultados. Prueba agregando ciudad y país, por ejemplo: “San Francisco 335, Santiago, Chile”.')
+    }
+
+    setSearching(false)
   }
 
   const selectedObject = (() => {
