@@ -1272,6 +1272,7 @@ function App() {
             setSettingsOpen(false)
             setLayersOpen(false)
             setTopographyImportOpen(false)
+            setProjectOpen(false)
           }}
         >
           <span>⌕</span><small>Buscar</small>
@@ -1285,6 +1286,7 @@ function App() {
             setSearchOpen(false)
             setSettingsOpen(false)
             setTopographyImportOpen(false)
+            setProjectOpen(false)
           }}
         >
           <span>☷</span><small>Capas</small>
@@ -1314,6 +1316,7 @@ function App() {
             setSettingsOpen(false)
             setLayersOpen(false)
             setTopographyImportOpen(false)
+            setProjectOpen(false)
           }}
         >
           <span>▦</span><small>Resultados</small>
@@ -1322,7 +1325,10 @@ function App() {
           type="button"
           className={panelOpen ? 'active' : ''}
           title="Modelo acústico"
-          onClick={() => setPanelOpen(v => !v)}
+          onClick={() => {
+            setPanelOpen(v => !v)
+            setProjectOpen(false)
+          }}
         >
           <span>≋</span><small>Modelo</small>
         </button>
@@ -1335,6 +1341,7 @@ function App() {
             setSearchOpen(false)
             setLayersOpen(false)
             setTopographyImportOpen(false)
+            setProjectOpen(false)
           }}
         >
           <span>⚙</span><small>General</small>
@@ -1382,40 +1389,38 @@ function App() {
       />
 
       {projectOpen && (
-        <div className="floating-dialog project-dialog">
-          <div className="dialog-header">
+        <div className="layers-popover project-popover">
+          <div className="project-popover-header">
             <div>
               <span className="eyebrow">PROYECTO</span>
-              <h3>Guardar y continuar después</h3>
+              <strong>Guardar / abrir</strong>
             </div>
-            <button onClick={() => setProjectOpen(false)}>×</button>
+            <button type="button" onClick={() => setProjectOpen(false)}>×</button>
           </div>
 
-          <div className="project-actions">
-            <button type="button" className="project-primary" onClick={saveProject}>
-              <span>↓</span>
-              <div>
-                <strong>Guardar proyecto</strong>
-                <small>Descarga todo el trabajo actual</small>
-              </div>
-            </button>
+          <button type="button" className="project-menu-action primary" onClick={saveProject}>
+            <span>↓</span>
+            <div>
+              <strong>Guardar proyecto</strong>
+              <small>Descargar archivo .noisemap.json</small>
+            </div>
+          </button>
 
-            <button
-              type="button"
-              className="project-secondary"
-              onClick={() => projectFileInputRef.current?.click()}
-            >
-              <span>↑</span>
-              <div>
-                <strong>Abrir proyecto</strong>
-                <small>Continúa desde un archivo guardado</small>
-              </div>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="project-menu-action"
+            onClick={() => projectFileInputRef.current?.click()}
+          >
+            <span>↑</span>
+            <div>
+              <strong>Abrir proyecto</strong>
+              <small>Cargar un proyecto guardado</small>
+            </div>
+          </button>
 
-          <div className="project-help">
-            El archivo conserva fuentes, espectros, receptores, barreras, topografía,
-            área de cálculo, configuración acústica y el último resultado disponible.
+          <div className="project-help compact">
+            Conserva fuentes, receptores, barreras, topografía, espectros,
+            configuración y último cálculo.
           </div>
 
           {projectMessage && (
