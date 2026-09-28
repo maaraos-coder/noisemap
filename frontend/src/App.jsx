@@ -338,6 +338,11 @@ function App() {
   const [resultsOpen, setResultsOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [projectMessage, setProjectMessage] = useState('')
+  const [barrierProfileOpen, setBarrierProfileOpen] = useState(false)
+  const [profileSourceId, setProfileSourceId] = useState('')
+  const [profileReceiverId, setProfileReceiverId] = useState('')
+  const [barrierProfile, setBarrierProfile] = useState(null)
+  const [barrierProfileLoading, setBarrierProfileLoading] = useState(false)
   const [layers, setLayers] = useState({
     raster: true,
     sources: true,
@@ -772,6 +777,76 @@ function App() {
     return null
   })()
 
+  useEffect(() => {
+    if (selected?.type !== 'barrier') return
+    if (!profileSourceId && sources[0]) setProfileSourceId(sources[0].id)
+    if (!profileReceiverId && receivers[0]) setProfileReceiverId(receivers[0].id)
+  }, [selected, sources, receivers, profileSourceId, profileReceiverId])
+
+  useEffect(() => {
+    if (!barrierProfileOpen || selected?.type !== 'barrier') return
+    const source = sources.find(item => item.id === profileSourceId)
+    const receiver = receivers.find(item => item.id === profileReceiverId)
+    const barrier = barriers.find(item => item.id === selected.id)
+    if (!source || !receiver || !barrier) return
+
+    let cancelled = false
+    const load = async () => {
+      setBarrierProfileLoading(true)
+      try {
+        const response = await fetch(`${API_BASE}/api/barrier-profile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source,
+            receiver,
+            barrier,
+            settings: {
+              resolution,
+              receiver_height_m: height,
+              alpha_db_per_km: alpha,
+              frequency_hz: frequency,
+              vmin,
+              vmax,
+              prediction_model: globalSettings.prediction_model,
+              a_weighting: globalSettings.a_weighting,
+              ground_factor: globalSettings.ground_factor,
+              temperature_c: globalSettings.temperature_c,
+              humidity_pct: globalSettings.humidity_pct,
+              max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
+              reflections_enabled: globalSettings.reflection_order !== 'none'
+            }
+          })
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`)
+        if (!cancelled) setBarrierProfile(data)
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) setBarrierProfile(null)
+      } finally {
+        if (!cancelled) setBarrierProfileLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [
+    barrierProfileOpen,
+    selected,
+    profileSourceId,
+    profileReceiverId,
+    sources,
+    receivers,
+    barriers,
+    resolution,
+    height,
+    alpha,
+    frequency,
+    vmin,
+    vmax,
+    globalSettings
+  ])
+
   const selectedReceiverResult = selected?.type === 'receiver'
     ? result?.receiver_results?.find(item => item.id === selected.id)
     : null
@@ -801,6 +876,10 @@ function App() {
 
   const removeSelected = () => {
     if (!selected) return
+    if (selected.type === 'barrier') {
+      setBarrierProfileOpen(false)
+      setBarrierProfile(null)
+    }
     if (selected.type === 'source') {
       setSources(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'receiver') {
@@ -2057,7 +2136,28 @@ function App() {
                   </button>
                 ))}
               </div>
-              <div className="engine-note">La atenuación por barrera sí participa en V3. La reflexión de la superficie queda almacenada para el motor con reflexiones.</div>
+              <h4 className="subheading barrier-profile-heading">Perfil acústico</h4>
+              <div className="profile-selector-grid">
+                <label>Fuente
+                  <select value={profileSourceId} onChange={e => setProfileSourceId(e.target.value)}>
+                    {sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+                  </select>
+                </label>
+                <label>Receptor
+                  <select value={profileReceiverId} onChange={e => setProfileReceiverId(e.target.value)}>
+                    {receivers.map(receiver => <option key={receiver.id} value={receiver.id}>{receiver.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <button
+                type="button"
+                className="profile-open-button"
+                disabled={!sources.length || !receivers.length}
+                onClick={() => setBarrierProfileOpen(true)}
+              >
+                Ver perfil acústico F–B–R
+              </button>
+              <div className="engine-note">La atenuación por barrera se calcula con la geometría F–B–R y depende de la frecuencia. Las reflexiones de superficie siguen almacenadas pero aún no forman parte del motor físico.</div>
             </>
           )}
 
@@ -2085,6 +2185,115 @@ function App() {
           )}
 
           <button className="delete-button" onClick={removeSelected}>Eliminar elemento</button>
+        </div>
+      )}
+
+      {barrierProfileOpen && selected?.type === 'barrier' && (
+        <div className="floating-dialog barrier-profile-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">BARRERA</span>
+              <h3>Perfil acústico F–B–R</h3>
+            </div>
+            <button onClick={() => setBarrierProfileOpen(false)}>×</button>
+          </div>
+
+          <div className="profile-top-row">
+            <label>Fuente
+              <select value={profileSourceId} onChange={e => setProfileSourceId(e.target.value)}>
+                {sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+              </select>
+            </label>
+            <label>Receptor
+              <select value={profileReceiverId} onChange={e => setProfileReceiverId(e.target.value)}>
+                {receivers.map(receiver => <option key={receiver.id} value={receiver.id}>{receiver.name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {barrierProfileLoading && <div className="profile-loading">Actualizando perfil…</div>}
+
+          {barrierProfile && (() => {
+            const total = Math.max(barrierProfile.horizontal_total_m || 1, 1)
+            const bx = Math.max(0, Math.min(1, (barrierProfile.source_to_barrier_m || 0) / total))
+            const maxH = Math.max(
+              Number(barrierProfile.source_height_m) || 0,
+              Number(barrierProfile.receiver_height_m) || 0,
+              Number(barrierProfile.barrier_height_m) || 0,
+              2
+            ) * 1.25
+            const x0 = 54
+            const x1 = 706
+            const groundY = 215
+            const usableH = 165
+            const sx = x0
+            const rx = x1
+            const barrierX = x0 + (x1 - x0) * bx
+            const yFor = h => groundY - (Number(h) / maxH) * usableH
+            const sy = yFor(barrierProfile.source_height_m)
+            const ry = yFor(barrierProfile.receiver_height_m)
+            const by = yFor(barrierProfile.barrier_height_m)
+            return (
+              <>
+                <div className="profile-status">
+                  <span className={barrierProfile.blocked ? 'blocked' : 'clear'}>
+                    {barrierProfile.blocked ? 'Trayectoria bloqueada' : 'Línea de visión libre'}
+                  </span>
+                  {!barrierProfile.intersects && <span className="warning">La barrera seleccionada no intersecta directamente F–R</span>}
+                </div>
+
+                <div className="profile-svg-wrap">
+                  <svg viewBox="0 0 760 270" role="img" aria-label="Perfil de fuente, barrera y receptor">
+                    <line x1="35" y1={groundY} x2="725" y2={groundY} className="profile-ground" />
+
+                    <line x1={sx} y1={sy} x2={rx} y2={ry} className="profile-los" />
+                    <polyline points={`${sx},${sy} ${barrierX},${by} ${rx},${ry}`} className="profile-diffracted" />
+
+                    <line x1={sx} y1={groundY} x2={sx} y2={sy} className="profile-height-line source" />
+                    <line x1={barrierX} y1={groundY} x2={barrierX} y2={by} className="profile-barrier" />
+                    <line x1={rx} y1={groundY} x2={rx} y2={ry} className="profile-height-line receiver" />
+
+                    <circle cx={sx} cy={sy} r="7" className="profile-source-point" />
+                    <path d={`M ${rx-7} ${ry+6} L ${rx} ${ry-7} L ${rx+7} ${ry+6} Z`} className="profile-receiver-point" />
+
+                    <text x={sx} y={Math.max(18, sy - 16)} textAnchor="middle" className="profile-label">FUENTE</text>
+                    <text x={barrierX} y={Math.max(18, by - 16)} textAnchor="middle" className="profile-label">BARRERA</text>
+                    <text x={rx} y={Math.max(18, ry - 16)} textAnchor="middle" className="profile-label">RECEPTOR</text>
+
+                    <text x={sx + 8} y={groundY - 8} className="profile-value">{Number(barrierProfile.source_height_m).toFixed(1)} m</text>
+                    <text x={barrierX + 8} y={groundY - 8} className="profile-value">{Number(barrierProfile.barrier_height_m).toFixed(1)} m</text>
+                    <text x={rx - 8} y={groundY - 8} textAnchor="end" className="profile-value">{Number(barrierProfile.receiver_height_m).toFixed(1)} m</text>
+
+                    <line x1={sx} y1="243" x2={barrierX} y2="243" className="profile-dimension" />
+                    <line x1={barrierX} y1="243" x2={rx} y2="243" className="profile-dimension" />
+                    <text x={(sx + barrierX)/2} y="259" textAnchor="middle" className="profile-distance">{barrierProfile.source_to_barrier_m.toFixed(1)} m</text>
+                    <text x={(barrierX + rx)/2} y="259" textAnchor="middle" className="profile-distance">{barrierProfile.barrier_to_receiver_m.toFixed(1)} m</text>
+                  </svg>
+                </div>
+
+                <div className="profile-metrics">
+                  <div><span>Distancia F–R</span><strong>{barrierProfile.horizontal_total_m.toFixed(1)} m</strong></div>
+                  <div><span>Altura LOS en barrera</span><strong>{barrierProfile.los_height_at_barrier_m.toFixed(2)} m</strong></div>
+                  <div><span>Exceso de trayectoria δ</span><strong>{barrierProfile.path_difference_m.toFixed(3)} m</strong></div>
+                  <div><span>Atenuación seleccionada</span><strong>{barrierProfile.selected_attenuation_db.toFixed(1)} dB</strong></div>
+                </div>
+
+                <h4 className="results-subtitle">Atenuación por banda de octava</h4>
+                <div className="profile-band-grid">
+                  {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                    <div key={freq}>
+                      <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
+                      <strong>{Number(barrierProfile.attenuation_by_band_db?.[String(freq)] ?? 0).toFixed(1)} dB</strong>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="profile-note">
+                  El perfil se actualiza automáticamente al modificar la altura de la fuente, barrera o receptor. La sección usa terreno plano por ahora; cuando conectemos las curvas de nivel al motor, este mismo perfil incorporará la topografía.
+                </div>
+              </>
+            )
+          })()}
         </div>
       )}
 
