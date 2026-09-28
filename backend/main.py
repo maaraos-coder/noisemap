@@ -672,6 +672,7 @@ class ReceiverPreviewRequest(BaseModel):
     roads: List[RoadIn] = []
     receiver: ReceiverIn
     barriers: List[BarrierIn] = []
+    buildings: List[BuildingIn] = []
     contours: List[ContourIn] = []
     settings: GridSettings = GridSettings()
 
