@@ -1273,6 +1273,7 @@ function App() {
     if (selected.type === 'source') return sources.find(x => x.id === selected.id)
     if (selected.type === 'receiver') return receivers.find(x => x.id === selected.id)
     if (selected.type === 'barrier') return barriers.find(x => x.id === selected.id)
+    if (selected.type === 'building') return buildings.find(x => x.id === selected.id)
     if (selected.type === 'road') return roads.find(x => x.id === selected.id)
     if (selected.type === 'contour') return contours.find(x => x.id === selected.id)
     return null
@@ -1567,6 +1568,8 @@ function App() {
       setReceivers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    } else if (selected.type === 'building') {
+      setBuildings(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'road') {
       setRoads(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
@@ -1586,6 +1589,9 @@ function App() {
       setReceivers(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.filter(x => x.id !== selected.id))
+    } else if (selected.type === 'building') {
+      setBuildings(prev => prev.filter(x => x.id !== selected.id))
+      setReceivers(prev => prev.filter(x => x.building_id !== selected.id))
     } else if (selected.type === 'road') {
       setRoads(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'contour') {
@@ -1612,7 +1618,7 @@ function App() {
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
 
       if (event.key === 'Escape') {
-        if (barrierStart || lineStart || draftPolygon.length || contourDraft.length || roadDraft.length) {
+        if (barrierStart || lineStart || draftPolygon.length || buildingDraft.length || contourDraft.length || roadDraft.length) {
           cancelDrawing()
         } else if (selected) {
           setSelected(null)
@@ -1634,7 +1640,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft, roadDraft, mode, polygon])
+  }, [selected, barrierStart, lineStart, draftPolygon, buildingDraft, contourDraft, roadDraft, mode, polygon])
 
   const imageCoordinates = result?.bounds
     ? [
