@@ -2911,6 +2911,7 @@ function App() {
               <span><b>{sources.length}</b> fuentes</span>
               <span><b>{receivers.length}</b> receptores</span>
               <span><b>{barriers.length}</b> barreras</span>
+              <span><b>{buildings.length}</b> edificios</span>
             </div>
 
             {result && (
