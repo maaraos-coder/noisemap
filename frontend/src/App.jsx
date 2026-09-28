@@ -21,28 +21,24 @@ const OSM_STYLE = {
   layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
 }
 
-const initialSources = [
-  {
-    id: crypto.randomUUID(),
-    name: 'Fuente 1',
-    lat: -33.45670,
-    lon: -70.64860,
-    height_m: 1.5,
-    lw_db: 100,
-    dc_db: 0,
-    enabled: true
-  }
-]
+const initialSources = [{
+  id: crypto.randomUUID(),
+  name: 'Fuente 1',
+  lat: -33.45670,
+  lon: -70.64860,
+  height_m: 1.5,
+  lw_db: 100,
+  dc_db: 0,
+  enabled: true
+}]
 
-const initialReceivers = [
-  {
-    id: crypto.randomUUID(),
-    name: 'Receptor 1',
-    lat: -33.45695,
-    lon: -70.64790,
-    height_m: 1.5
-  }
-]
+const initialReceivers = [{
+  id: crypto.randomUUID(),
+  name: 'Receptor 1',
+  lat: -33.45695,
+  lon: -70.64790,
+  height_m: 1.5
+}]
 
 const defaultPolygon = [
   [-33.4580, -70.6502],
@@ -53,10 +49,7 @@ const defaultPolygon = [
 
 function polygonGeoJSON(points) {
   if (!points || points.length < 3) {
-    return {
-      type: 'FeatureCollection',
-      features: []
-    }
+    return { type: 'FeatureCollection', features: [] }
   }
 
   const ring = [...points.map(([lat, lon]) => [lon, lat])]
@@ -95,7 +88,7 @@ function levelColor(value, vmin, vmax) {
   const j = Math.min(COLORS.length - 1, i + 1)
   const f = scaled - i
 
-  const rgb = (hex) => [
+  const rgb = hex => [
     parseInt(hex.slice(1, 3), 16),
     parseInt(hex.slice(3, 5), 16),
     parseInt(hex.slice(5, 7), 16)
@@ -111,13 +104,13 @@ function rasterDataUrl(levels, vmin, vmax) {
 
   const height = levels.length
   const width = levels[0].length
-  const scale = 5
-
+  const scale = 6
   const canvas = document.createElement('canvas')
   canvas.width = width * scale
   canvas.height = height * scale
   const ctx = canvas.getContext('2d')
   ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
 
   levels.forEach((row, y) => {
     row.forEach((value, x) => {
@@ -126,7 +119,7 @@ function rasterDataUrl(levels, vmin, vmax) {
         return
       }
       const [r, g, b] = levelColor(value, vmin, vmax)
-      ctx.fillStyle = `rgba(${r},${g},${b},0.72)`
+      ctx.fillStyle = `rgba(${r},${g},${b},0.70)`
       ctx.fillRect(x * scale, y * scale, scale, scale)
     })
   })
@@ -134,7 +127,19 @@ function rasterDataUrl(levels, vmin, vmax) {
   return canvas.toDataURL('image/png')
 }
 
-function IconButton({ active, title, children, onClick }) {
+function haversineMeters(aLat, aLon, bLat, bLon) {
+  const R = 6371000
+  const toRad = d => d * Math.PI / 180
+  const dLat = toRad(bLat - aLat)
+  const dLon = toRad(bLon - aLon)
+  const aa =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) *
+    Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa))
+}
+
+function IconButton({ active, title, icon, label, onClick }) {
   return (
     <button
       className={`tool-button ${active ? 'active' : ''}`}
@@ -142,7 +147,8 @@ function IconButton({ active, title, children, onClick }) {
       onClick={onClick}
       type="button"
     >
-      {children}
+      <span className="tool-icon">{icon}</span>
+      <span className="tool-label">{label}</span>
     </button>
   )
 }
@@ -170,6 +176,14 @@ function App() {
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [layersOpen, setLayersOpen] = useState(false)
+  const [layers, setLayers] = useState({
+    raster: true,
+    sources: true,
+    receivers: true,
+    barriers: true,
+    area: true
+  })
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
@@ -180,11 +194,19 @@ function App() {
     [result, vmin, vmax]
   )
 
+  const legendTicks = useMemo(() => {
+    const top = Math.ceil(vmax / 5) * 5
+    const bottom = Math.floor(vmin / 5) * 5
+    const ticks = []
+    for (let v = top; v >= bottom; v -= 5) ticks.push(v)
+    return ticks
+  }, [vmin, vmax])
+
   useEffect(() => {
     setDirty(true)
   }, [sources, barriers, polygon, resolution, height, alpha, frequency, vmin, vmax])
 
-  const onMapClick = (event) => {
+  const onMapClick = event => {
     const { lat, lng } = event.lngLat
 
     if (mode === 'source') {
@@ -265,9 +287,7 @@ function App() {
         })
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
       const data = await response.json()
       setResult(data)
@@ -302,7 +322,16 @@ function App() {
     return null
   })()
 
-  const patchSelected = (patch) => {
+  const nearestReceiverDistance = useMemo(() => {
+    if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
+    const distances = receivers.map(r => ({
+      name: r.name,
+      distance: haversineMeters(selectedObject.lat, selectedObject.lon, r.lat, r.lon)
+    }))
+    return distances.sort((a, b) => a.distance - b.distance)[0]
+  }, [selectedObject, selected, receivers])
+
+  const patchSelected = patch => {
     if (!selected) return
 
     if (selected.type === 'source') {
@@ -335,6 +364,10 @@ function App() {
       ]
     : null
 
+  const updatePolygonVertex = (index, lat, lon) => {
+    setPolygon(prev => prev.map((point, i) => i === index ? [lat, lon] : point))
+  }
+
   return (
     <div className="app-shell">
       <Map
@@ -346,12 +379,12 @@ function App() {
         }}
         mapStyle={OSM_STYLE}
         onClick={onMapClick}
-        cursor={mode === 'navigate' ? 'grab' : 'crosshair'}
+        cursor={mode === 'navigate' ? 'grab' : mode === 'edit-area' ? 'default' : 'crosshair'}
         doubleClickZoom={mode !== 'area'}
       >
         <NavigationControl position="bottom-left" />
 
-        {rasterUrl && imageCoordinates && (
+        {layers.raster && rasterUrl && imageCoordinates && (
           <Source
             id="noise-raster"
             type="image"
@@ -370,25 +403,24 @@ function App() {
           </Source>
         )}
 
-        <Source id="calculation-area" type="geojson" data={polygonData}>
-          <Layer
-            id="calculation-area-fill"
-            type="fill"
-            paint={{
-              'fill-color': '#0b63ce',
-              'fill-opacity': 0.03
-            }}
-          />
-          <Layer
-            id="calculation-area-line"
-            type="line"
-            paint={{
-              'line-color': '#0b63ce',
-              'line-width': 2.5,
-              'line-dasharray': [2, 1.5]
-            }}
-          />
-        </Source>
+        {layers.area && (
+          <Source id="calculation-area" type="geojson" data={polygonData}>
+            <Layer
+              id="calculation-area-fill"
+              type="fill"
+              paint={{ 'fill-color': '#0b63ce', 'fill-opacity': 0.02 }}
+            />
+            <Layer
+              id="calculation-area-line"
+              type="line"
+              paint={{
+                'line-color': '#0b63ce',
+                'line-width': 2.2,
+                'line-dasharray': [2, 1.5]
+              }}
+            />
+          </Source>
+        )}
 
         {draftPolygon.length >= 2 && (
           <Source id="draft-area" type="geojson" data={draftData}>
@@ -400,18 +432,17 @@ function App() {
           </Source>
         )}
 
-        <Source id="barriers" type="geojson" data={barrierData}>
-          <Layer
-            id="barriers-line"
-            type="line"
-            paint={{
-              'line-color': '#6f42c1',
-              'line-width': 5
-            }}
-          />
-        </Source>
+        {layers.barriers && (
+          <Source id="barriers" type="geojson" data={barrierData}>
+            <Layer
+              id="barriers-line"
+              type="line"
+              paint={{ 'line-color': '#6f42c1', 'line-width': 4.5 }}
+            />
+          </Source>
+        )}
 
-        {sources.map(source => (
+        {layers.sources && sources.map(source => (
           <Marker
             key={source.id}
             longitude={source.lon}
@@ -428,11 +459,15 @@ function App() {
               setSelected({ type: 'source', id: source.id })
             }}
           >
-            <div className="map-marker source-marker" title={source.name}>S</div>
+            <div className="technical-marker source-marker" title={source.name}>
+              <span className="source-wave wave-a" />
+              <span className="source-wave wave-b" />
+              <span className="source-core">S</span>
+            </div>
           </Marker>
         ))}
 
-        {receivers.map(receiver => (
+        {layers.receivers && receivers.map(receiver => (
           <Marker
             key={receiver.id}
             longitude={receiver.lon}
@@ -449,11 +484,14 @@ function App() {
               setSelected({ type: 'receiver', id: receiver.id })
             }}
           >
-            <div className="map-marker receiver-marker" title={receiver.name}>R</div>
+            <div className="technical-marker receiver-marker" title={receiver.name}>
+              <span className="receiver-ring" />
+              <span className="receiver-core">R</span>
+            </div>
           </Marker>
         ))}
 
-        {barriers.flatMap(barrier => ([
+        {layers.barriers && barriers.flatMap(barrier => ([
           <Marker
             key={`${barrier.id}-a`}
             longitude={barrier.lon_a}
@@ -495,6 +533,21 @@ function App() {
             />
           </Marker>
         ]))}
+
+        {mode === 'edit-area' && polygon.map(([lat, lon], index) => (
+          <Marker
+            key={`polygon-vertex-${index}`}
+            longitude={lon}
+            latitude={lat}
+            draggable
+            onDragEnd={e => {
+              const { lat: newLat, lng: newLon } = e.lngLat
+              updatePolygonVertex(index, newLat, newLon)
+            }}
+          >
+            <div className="area-vertex" title={`Vértice ${index + 1}`} />
+          </Marker>
+        ))}
       </Map>
 
       <header className="brand-bar">
@@ -511,14 +564,27 @@ function App() {
       </header>
 
       <div className="map-toolbar">
-        <IconButton active={mode === 'navigate'} title="Navegar" onClick={() => setMode('navigate')}>↔</IconButton>
-        <IconButton active={mode === 'source'} title="Agregar fuente" onClick={() => setMode('source')}>S</IconButton>
-        <IconButton active={mode === 'receiver'} title="Agregar receptor" onClick={() => setMode('receiver')}>R</IconButton>
-        <IconButton active={mode === 'barrier'} title="Dibujar barrera" onClick={() => setMode('barrier')}>╱</IconButton>
-        <IconButton active={mode === 'area'} title="Dibujar área de cálculo" onClick={() => {
+        <IconButton active={mode === 'navigate'} title="Navegar por el mapa" icon="✥" label="Navegar" onClick={() => setMode('navigate')} />
+        <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
+        <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
+        <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="╱" label="Barrera" onClick={() => setMode('barrier')} />
+        <IconButton active={mode === 'area'} title="Dibujar nueva área de cálculo" icon="▱" label="Área" onClick={() => {
           setDraftPolygon([])
           setMode('area')
-        }}>▱</IconButton>
+        }} />
+        <IconButton active={mode === 'edit-area'} title="Editar vértices del área de cálculo" icon="◇" label="Editar área" onClick={() => setMode('edit-area')} />
+
+        <div className="toolbar-divider" />
+
+        <button
+          className={`tool-button layer-button ${layersOpen ? 'active' : ''}`}
+          type="button"
+          title="Capas visibles"
+          onClick={() => setLayersOpen(v => !v)}
+        >
+          <span className="tool-icon">☷</span>
+          <span className="tool-label">Capas</span>
+        </button>
 
         {mode === 'area' && draftPolygon.length >= 3 && (
           <button className="tool-action" onClick={finishArea}>Cerrar área</button>
@@ -527,7 +593,35 @@ function App() {
         {(mode === 'area' || barrierStart) && (
           <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
         )}
+
+        {dirty && result && (
+          <div className="dirty-chip" title="Hay cambios que aún no están reflejados en el mapa calculado">
+            ● Cambios sin calcular
+          </div>
+        )}
       </div>
+
+      {layersOpen && (
+        <div className="layers-popover">
+          <div className="popover-title">Capas</div>
+          {[
+            ['raster', 'Mapa de ruido'],
+            ['sources', 'Fuentes'],
+            ['receivers', 'Receptores'],
+            ['barriers', 'Barreras'],
+            ['area', 'Área de cálculo']
+          ].map(([key, label]) => (
+            <label key={key} className="layer-row">
+              <input
+                type="checkbox"
+                checked={layers[key]}
+                onChange={() => setLayers(prev => ({ ...prev, [key]: !prev[key] }))}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      )}
 
       <aside className={`control-panel ${panelOpen ? '' : 'collapsed'}`}>
         <button className="panel-toggle" onClick={() => setPanelOpen(x => !x)}>
@@ -536,7 +630,15 @@ function App() {
 
         {panelOpen && (
           <>
-            <h2>Modelo acústico</h2>
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">PROPAGACIÓN EXTERIOR</span>
+                <h2>Modelo acústico</h2>
+              </div>
+              <span className={`model-state ${dirty ? 'dirty' : 'clean'}`}>
+                {dirty ? 'Modificado' : 'Actualizado'}
+              </span>
+            </div>
 
             <label>
               Resolución
@@ -598,25 +700,23 @@ function App() {
             </div>
 
             <button
-              className="calculate-button"
+              className={`calculate-button ${dirty ? 'needs-update' : ''}`}
               disabled={calculating}
               onClick={calculate}
             >
-              {calculating ? 'Calculando…' : dirty ? 'CALCULAR MAPA' : 'MAPA ACTUALIZADO'}
+              {calculating ? 'Calculando…' : dirty ? 'ACTUALIZAR MAPA' : 'MAPA ACTUALIZADO'}
             </button>
 
             <div className="summary-row">
-              <span>{sources.length} fuentes</span>
-              <span>{receivers.length} receptores</span>
-              <span>{barriers.length} barreras</span>
+              <span><b>{sources.length}</b> fuentes</span>
+              <span><b>{receivers.length}</b> receptores</span>
+              <span><b>{barriers.length}</b> barreras</span>
             </div>
 
             {result && (
               <div className="result-card">
                 <small>Rango calculado</small>
-                <strong>
-                  {result.min_level?.toFixed(1)} – {result.max_level?.toFixed(1)} dB
-                </strong>
+                <strong>{result.min_level?.toFixed(1)} – {result.max_level?.toFixed(1)} dB</strong>
               </div>
             )}
           </>
@@ -625,20 +725,29 @@ function App() {
 
       <div className="noise-legend">
         <div className="legend-title">dB</div>
-        <div className="legend-scale">
+        <div className="legend-scale" style={{ height: `${Math.max(250, legendTicks.length * 30)}px` }}>
           <div className="legend-gradient" />
           <div className="legend-labels">
-            {[vmax, vmax - (vmax-vmin)*.25, vmax - (vmax-vmin)*.5, vmax - (vmax-vmin)*.75, vmin].map((v, i) => (
-              <span key={i}>{Math.round(v)}</span>
-            ))}
+            {legendTicks.map(v => <span key={v}>{v}</span>)}
           </div>
         </div>
+        <div className="legend-note">Nivel calculado</div>
       </div>
 
       {selectedObject && (
         <div className="object-card">
           <button className="close-card" onClick={() => setSelected(null)}>×</button>
+          <div className="object-type">
+            {selected.type === 'source' ? 'FUENTE PUNTUAL' : selected.type === 'receiver' ? 'RECEPTOR' : 'BARRERA'}
+          </div>
           <h3>{selectedObject.name}</h3>
+
+          {selected.type !== 'barrier' && (
+            <div className="coordinate-row">
+              <span>{selectedObject.lat.toFixed(6)}</span>
+              <span>{selectedObject.lon.toFixed(6)}</span>
+            </div>
+          )}
 
           {selected.type === 'source' && (
             <>
@@ -662,6 +771,14 @@ function App() {
                 value={selectedObject.dc_db}
                 onChange={e => patchSelected({ dc_db: Number(e.target.value) })}
               />
+
+              {nearestReceiverDistance && (
+                <div className="distance-card">
+                  <span>Receptor más cercano</span>
+                  <strong>{nearestReceiverDistance.name}</strong>
+                  <b>{nearestReceiverDistance.distance.toFixed(1)} m</b>
+                </div>
+              )}
             </>
           )}
 
@@ -689,7 +806,7 @@ function App() {
             </>
           )}
 
-          <button className="delete-button" onClick={removeSelected}>Eliminar</button>
+          <button className="delete-button" onClick={removeSelected}>Eliminar elemento</button>
         </div>
       )}
 
@@ -701,6 +818,10 @@ function App() {
         <div className="status-pill">
           Haz clic para agregar vértices · {draftPolygon.length} puntos
         </div>
+      )}
+
+      {mode === 'edit-area' && (
+        <div className="status-pill">Arrastra los vértices azules para editar el área de cálculo</div>
       )}
 
       <footer className="map-footer">
