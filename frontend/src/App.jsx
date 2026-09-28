@@ -29,7 +29,12 @@ const initialSources = [{
   height_m: 1.5,
   lw_db: 100,
   dc_db: 0,
-  enabled: true
+  enabled: true,
+  spectrum_mode: 'broadband',
+  single_frequency_hz: 500,
+  octave_levels: {63: 92, 125: 95, 250: 98, 500: 100, 1000: 98, 2000: 94, 4000: 90, 8000: 84},
+  adjust_db: 0,
+  time_active_pct: 100
 }]
 
 const initialReceivers = [{
@@ -37,7 +42,9 @@ const initialReceivers = [{
   name: 'Receptor 1',
   lat: -33.45695,
   lon: -70.64790,
-  height_m: 1.5
+  height_m: 1.5,
+  visible: true,
+  height_mode: 'map'
 }]
 
 const defaultPolygon = [
@@ -79,6 +86,36 @@ function barriersGeoJSON(barriers) {
         }
       }))
   }
+}
+
+
+function accessoriesGeoJSON(lines) {
+  return {
+    type: 'FeatureCollection',
+    features: lines.map(line => ({
+      type: 'Feature',
+      properties: { id: line.id, name: line.name, kind: line.kind },
+      geometry: { type: 'LineString', coordinates: [[line.lon_a, line.lat_a], [line.lon_b, line.lat_b]] }
+    }))
+  }
+}
+
+function raysGeoJSON(sources, receivers, rayMode) {
+  if (rayMode === 'off') return { type: 'FeatureCollection', features: [] }
+  const features = []
+  sources.filter(s => s.enabled).forEach(source => {
+    receivers.filter(r => r.visible !== false).forEach(receiver => {
+      features.push({
+        type: 'Feature',
+        properties: { source: source.name, receiver: receiver.name, mode: rayMode },
+        geometry: {
+          type: 'LineString',
+          coordinates: [[source.lon, source.lat], [receiver.lon, receiver.lat]]
+        }
+      })
+    })
+  })
+  return { type: 'FeatureCollection', features }
 }
 
 function levelColor(value, vmin, vmax) {
@@ -160,9 +197,31 @@ function App() {
   const [sources, setSources] = useState(initialSources)
   const [receivers, setReceivers] = useState(initialReceivers)
   const [barriers, setBarriers] = useState([])
+  const [accessories, setAccessories] = useState([])
   const [polygon, setPolygon] = useState(defaultPolygon)
   const [draftPolygon, setDraftPolygon] = useState([])
   const [barrierStart, setBarrierStart] = useState(null)
+  const [lineStart, setLineStart] = useState(null)
+  const [rayMode, setRayMode] = useState('off')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [searchText, setSearchText] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState([])
+  const [globalSettings, setGlobalSettings] = useState({
+    prediction_model: 'ISO 9613-2:2024',
+    a_weighting: true,
+    ground_factor: 0,
+    temperature_c: 15,
+    humidity_pct: 70,
+    barrier_limit: true,
+    vertical_edge_diffraction: true,
+    limit_distance: true,
+    convex_path: true,
+    reflection_order: 'first-second',
+    facade_1m: true,
+    reflector_size_check: true
+  })
 
   const [resolution, setResolution] = useState(48)
   const [height, setHeight] = useState(1.5)
@@ -182,10 +241,14 @@ function App() {
     sources: true,
     receivers: true,
     barriers: true,
+    accessories: true,
+    rays: true,
     area: true
   })
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
+  const accessoryData = useMemo(() => accessoriesGeoJSON(accessories), [accessories])
+  const rayData = useMemo(() => raysGeoJSON(sources, receivers, rayMode), [sources, receivers, rayMode])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
   const draftData = useMemo(() => polygonGeoJSON(draftPolygon), [draftPolygon])
 
@@ -204,7 +267,7 @@ function App() {
 
   useEffect(() => {
     setDirty(true)
-  }, [sources, barriers, polygon, resolution, height, alpha, frequency, vmin, vmax])
+  }, [sources, barriers, polygon, resolution, height, alpha, frequency, vmin, vmax, globalSettings])
 
   const onMapClick = event => {
     const { lat, lng } = event.lngLat
@@ -218,7 +281,12 @@ function App() {
         height_m: 1.5,
         lw_db: 100,
         dc_db: 0,
-        enabled: true
+        enabled: true,
+        spectrum_mode: 'broadband',
+        single_frequency_hz: 500,
+        octave_levels: {63: 92, 125: 95, 250: 98, 500: 100, 1000: 98, 2000: 94, 4000: 90, 8000: 84},
+        adjust_db: 0,
+        time_active_pct: 100
       }
       setSources(prev => [...prev, item])
       setSelected({ type: 'source', id: item.id })
@@ -231,7 +299,9 @@ function App() {
         name: `Receptor ${receivers.length + 1}`,
         lat,
         lon: lng,
-        height_m: 1.5
+        height_m: 1.5,
+        visible: true,
+        height_mode: 'map'
       }
       setReceivers(prev => [...prev, item])
       setSelected({ type: 'receiver', id: item.id })
@@ -259,6 +329,26 @@ function App() {
       return
     }
 
+    if (mode === 'line') {
+      if (!lineStart) {
+        setLineStart([lat, lng])
+      } else {
+        const item = {
+          id: crypto.randomUUID(),
+          name: `Línea auxiliar ${accessories.length + 1}`,
+          kind: 'measurement',
+          lat_a: lineStart[0],
+          lon_a: lineStart[1],
+          lat_b: lat,
+          lon_b: lng,
+          height_m: 0
+        }
+        setAccessories(prev => [...prev, item])
+        setLineStart(null)
+      }
+      return
+    }
+
     if (mode === 'area') {
       setDraftPolygon(prev => [...prev, [lat, lng]])
     }
@@ -282,7 +372,14 @@ function App() {
             alpha_db_per_km: alpha,
             frequency_hz: frequency,
             vmin,
-            vmax
+            vmax,
+            prediction_model: globalSettings.prediction_model,
+            a_weighting: globalSettings.a_weighting,
+            ground_factor: globalSettings.ground_factor,
+            temperature_c: globalSettings.temperature_c,
+            humidity_pct: globalSettings.humidity_pct,
+            max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
+            reflections_enabled: globalSettings.reflection_order !== 'none'
           }
         })
       })
@@ -311,7 +408,42 @@ function App() {
   const cancelDrawing = () => {
     setDraftPolygon([])
     setBarrierStart(null)
+    setLineStart(null)
     setMode('navigate')
+  }
+
+
+  const runSearch = async () => {
+    const q = searchText.trim()
+    if (!q) return
+
+    const coordinateMatch = q.match(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*[,; ]\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)
+    if (coordinateMatch) {
+      const lat = Number(coordinateMatch[1])
+      const lon = Number(coordinateMatch[2])
+      mapRef.current?.flyTo({ center: [lon, lat], zoom: 18 })
+      setSearchResults([{ display_name: `Coordenadas ${lat.toFixed(6)}, ${lon.toFixed(6)}`, lat, lon }])
+      return
+    }
+
+    setSearching(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/geocode?q=${encodeURIComponent(q)}`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setSearchResults(data.results || [])
+      if (data.results?.[0]) {
+        mapRef.current?.flyTo({
+          center: [Number(data.results[0].lon), Number(data.results[0].lat)],
+          zoom: 17
+        })
+      }
+    } catch (error) {
+      console.error(error)
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
   }
 
   const selectedObject = (() => {
@@ -442,6 +574,36 @@ function App() {
           </Source>
         )}
 
+
+        {layers.accessories && (
+          <Source id="accessories" type="geojson" data={accessoryData}>
+            <Layer
+              id="accessories-line"
+              type="line"
+              paint={{
+                'line-color': '#222222',
+                'line-width': 2,
+                'line-dasharray': [3, 2]
+              }}
+            />
+          </Source>
+        )}
+
+        {layers.rays && rayMode !== 'off' && (
+          <Source id="source-receiver-rays" type="geojson" data={rayData}>
+            <Layer
+              id="source-receiver-rays-line"
+              type="line"
+              paint={{
+                'line-color': rayMode === 'rays' ? '#111827' : '#0b63ce',
+                'line-width': rayMode === 'rays' ? 1.5 : 2.5,
+                'line-opacity': 0.65,
+                'line-dasharray': rayMode === 'rays' ? [2, 2] : [1, 2]
+              }}
+            />
+          </Source>
+        )}
+
         {layers.sources && sources.map(source => (
           <Marker
             key={source.id}
@@ -568,6 +730,7 @@ function App() {
         <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
         <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
         <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="╱" label="Barrera" onClick={() => setMode('barrier')} />
+        <IconButton active={mode === 'line'} title="Agregar línea auxiliar de medición" icon="⌇" label="Línea" onClick={() => setMode('line')} />
         <IconButton active={mode === 'area'} title="Dibujar nueva área de cálculo" icon="▱" label="Área" onClick={() => {
           setDraftPolygon([])
           setMode('area')
@@ -575,6 +738,26 @@ function App() {
         <IconButton active={mode === 'edit-area'} title="Editar vértices del área de cálculo" icon="◇" label="Editar área" onClick={() => setMode('edit-area')} />
 
         <div className="toolbar-divider" />
+
+        <button
+          className={`tool-button ${searchOpen ? 'active' : ''}`}
+          type="button"
+          title="Buscar dirección o coordenadas"
+          onClick={() => setSearchOpen(v => !v)}
+        >
+          <span className="tool-icon">⌕</span>
+          <span className="tool-label">Buscar</span>
+        </button>
+
+        <button
+          className={`tool-button ${settingsOpen ? 'active' : ''}`}
+          type="button"
+          title="Configuración global"
+          onClick={() => setSettingsOpen(v => !v)}
+        >
+          <span className="tool-icon">⚙</span>
+          <span className="tool-label">General</span>
+        </button>
 
         <button
           className={`tool-button layer-button ${layersOpen ? 'active' : ''}`}
@@ -590,7 +773,7 @@ function App() {
           <button className="tool-action" onClick={finishArea}>Cerrar área</button>
         )}
 
-        {(mode === 'area' || barrierStart) && (
+        {(mode === 'area' || barrierStart || lineStart) && (
           <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
         )}
 
@@ -609,6 +792,8 @@ function App() {
             ['sources', 'Fuentes'],
             ['receivers', 'Receptores'],
             ['barriers', 'Barreras'],
+            ['accessories', 'Líneas auxiliares'],
+            ['rays', 'Rayos fuente–receptor'],
             ['area', 'Área de cálculo']
           ].map(([key, label]) => (
             <label key={key} className="layer-row">
@@ -620,6 +805,134 @@ function App() {
               <span>{label}</span>
             </label>
           ))}
+        </div>
+      )}
+
+
+      {searchOpen && (
+        <div className="floating-dialog search-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">UBICACIÓN</span>
+              <h3>Buscar dirección o coordenadas</h3>
+            </div>
+            <button onClick={() => setSearchOpen(false)}>×</button>
+          </div>
+          <div className="search-row">
+            <input
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && runSearch()}
+              placeholder="Dirección, comuna o -33.45, -70.65"
+            />
+            <button onClick={runSearch}>{searching ? '…' : 'Buscar'}</button>
+          </div>
+          <div className="search-results">
+            {searchResults.slice(0, 5).map((item, index) => (
+              <button
+                key={index}
+                onClick={() => mapRef.current?.flyTo({ center: [Number(item.lon), Number(item.lat)], zoom: 18 })}
+              >
+                <strong>{item.display_name}</strong>
+                <span>{Number(item.lat).toFixed(6)}, {Number(item.lon).toFixed(6)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="floating-dialog settings-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">CONFIGURACIÓN GLOBAL</span>
+              <h3>Modelo de predicción</h3>
+            </div>
+            <button onClick={() => setSettingsOpen(false)}>×</button>
+          </div>
+
+          <div className="settings-section">
+            <label>Método general
+              <select
+                value={globalSettings.prediction_model}
+                onChange={e => setGlobalSettings(s => ({ ...s, prediction_model: e.target.value }))}
+              >
+                <option>ISO 9613-2:2024</option>
+                <option>ISO 9613-2:1996</option>
+              </select>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={globalSettings.a_weighting}
+                onChange={e => setGlobalSettings(s => ({ ...s, a_weighting: e.target.checked }))} />
+              Ponderación A
+            </label>
+          </div>
+
+          <div className="settings-section">
+            <h4>Efecto de suelo</h4>
+            <label>Factor de suelo (G)
+              <input type="number" min="0" max="1" step="0.1" value={globalSettings.ground_factor}
+                onChange={e => setGlobalSettings(s => ({ ...s, ground_factor: Number(e.target.value) }))} />
+            </label>
+            <div className="future-note">Preparado para el motor espectral; todavía no modifica el cálculo V3.</div>
+          </div>
+
+          <div className="settings-section two-cols">
+            <label>Temperatura [°C]
+              <input type="number" value={globalSettings.temperature_c}
+                onChange={e => setGlobalSettings(s => ({ ...s, temperature_c: Number(e.target.value) }))} />
+            </label>
+            <label>Humedad [%]
+              <input type="number" min="0" max="100" value={globalSettings.humidity_pct}
+                onChange={e => setGlobalSettings(s => ({ ...s, humidity_pct: Number(e.target.value) }))} />
+            </label>
+          </div>
+
+          <div className="settings-section">
+            <h4>Atenuación por barreras</h4>
+            {[
+              ['barrier_limit', 'Aplicar límite de atenuación'],
+              ['vertical_edge_diffraction', 'Difracción por borde vertical'],
+              ['limit_distance', 'Limitar distancia'],
+              ['convex_path', 'Trayectoria convexa']
+            ].map(([key, label]) => (
+              <label className="check-row" key={key}>
+                <input type="checkbox" checked={globalSettings[key]}
+                  onChange={e => setGlobalSettings(s => ({ ...s, [key]: e.target.checked }))} />
+                {label}
+              </label>
+            ))}
+          </div>
+
+          <div className="settings-section">
+            <h4>Reflexiones</h4>
+            <label>Orden
+              <select value={globalSettings.reflection_order}
+                onChange={e => setGlobalSettings(s => ({ ...s, reflection_order: e.target.value }))}>
+                <option value="none">Ninguna</option>
+                <option value="first">Primer orden</option>
+                <option value="first-second">Primer y segundo orden</option>
+              </select>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={globalSettings.facade_1m}
+                onChange={e => setGlobalSettings(s => ({ ...s, facade_1m: e.target.checked }))} />
+              Fachada a 1 m
+            </label>
+            <div className="future-note">La interfaz ya almacena estas opciones; las reflexiones se incorporarán al motor físico en la siguiente etapa.</div>
+          </div>
+
+          <div className="settings-section">
+            <h4>Rayo fuente–receptor</h4>
+            <div className="segmented">
+              {['off','rays','waves'].map(value => (
+                <button key={value} className={rayMode === value ? 'active' : ''}
+                  onClick={() => setRayMode(value)}>
+                  {value === 'off' ? 'Off' : value === 'rays' ? 'Rayos' : 'Ondas'}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -812,6 +1125,10 @@ function App() {
 
       {mode === 'barrier' && barrierStart && (
         <div className="status-pill">Selecciona el segundo extremo de la barrera</div>
+      )}
+
+      {mode === 'line' && lineStart && (
+        <div className="status-pill">Selecciona el segundo extremo de la línea auxiliar</div>
       )}
 
       {mode === 'area' && (
