@@ -1259,3 +1259,23 @@ select {
     width: calc(100vw - 28px);
   }
 }
+
+
+/* Legend on left side */
+.noise-legend {
+  left: 12px !important;
+  right: auto !important;
+  top: 330px !important;
+}
+
+.control-panel.open + .noise-legend {
+  left: 365px !important;
+}
+
+@media (max-width: 900px) {
+  .noise-legend {
+    left: 8px !important;
+    right: auto !important;
+    top: 310px !important;
+  }
+}
