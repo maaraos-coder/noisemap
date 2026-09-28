@@ -348,7 +348,8 @@ function App() {
           lat_b: lat,
           lon_b: lng,
           height_m: 3,
-          enabled: true
+          enabled: true,
+          reflection_percent: 0
         }
         setBarriers(prev => [...prev, item])
         setBarrierStart(null)
