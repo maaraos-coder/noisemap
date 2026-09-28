@@ -1001,7 +1001,10 @@ function App() {
       points: buildingDraft,
       height_m: 10,
       enabled: true,
-      reflection_percent: 20
+      reflection_percent: 20,
+      receiver_start_height_m: 1.5,
+      receiver_spacing_m: 3,
+      receiver_offset_m: 1
     }
     setBuildings(prev => [...prev, item])
     setBuildingDraft([])
@@ -1028,25 +1031,36 @@ function App() {
     dLat /= norm
     dLon /= norm
 
-    // Place receptor approximately 1 m outside the selected facade.
     const metersPerDegLat = 111320
-    const lat = midLat + dLat / metersPerDegLat
-    const lon = midLon + dLon / (metersPerDegLat * Math.max(Math.cos(midLat * Math.PI / 180), 0.2))
+    const offsetM = Math.max(0.1, Number(building.receiver_offset_m) || 1)
+    const lat = midLat + (dLat * offsetM) / metersPerDegLat
+    const lon = midLon + (dLon * offsetM) / (metersPerDegLat * Math.max(Math.cos(midLat * Math.PI / 180), 0.2))
 
-    const maxHeight = Math.max(1.5, Number(building.height_m) || 10)
+    const maxHeight = Math.max(0.5, Number(building.height_m) || 10)
+    const startHeight = Math.max(0.1, Math.min(maxHeight, Number(building.receiver_start_height_m) || 1.5))
+    const spacing = Math.max(0.1, Number(building.receiver_spacing_m) || 3)
+
+    const associated = receivers.filter(receiver => receiver.building_id === building.id)
+    const maxExistingSequence = associated.reduce((maxValue, receiver) => {
+      const match = String(receiver.name || '').match(/^RE(\d+)$/i)
+      return match ? Math.max(maxValue, Number(match[1])) : maxValue
+    }, 0)
+
     const newReceivers = []
-    for (let h = 1.5; h <= maxHeight + 0.001; h += 3) {
+    let sequence = maxExistingSequence + 1
+    for (let h = startHeight; h <= maxHeight + 0.001; h += spacing) {
       newReceivers.push({
         id: crypto.randomUUID(),
-        name: `${building.name} · F${edgeIndex + 1} · ${h.toFixed(1)} m`,
+        name: `RE${sequence}`,
         lat,
         lon,
-        height_m: Number(h.toFixed(1)),
+        height_m: Number(h.toFixed(2)),
         visible: true,
         height_mode: 'facade',
         building_id: building.id,
         facade_index: edgeIndex
       })
+      sequence += 1
     }
 
     setReceivers(prev => [...prev, ...newReceivers])
@@ -1747,7 +1761,7 @@ function App() {
               type="line"
               paint={{
                 'line-color': '#6f42c1',
-                'line-width': 3,
+                'line-width': 2,
                 'line-dasharray': [2, 1.5],
                 'line-opacity': 0.85
               }}
@@ -1789,7 +1803,7 @@ function App() {
               type="fill"
               paint={{
                 'fill-color': '#7c8793',
-                'fill-opacity': 0.28
+                'fill-opacity': 0.18
               }}
             />
             <Layer
@@ -1797,7 +1811,7 @@ function App() {
               type="line"
               paint={{
                 'line-color': '#3f4a55',
-                'line-width': 2.5
+                'line-width': 1.4
               }}
             />
           </Source>
@@ -3239,6 +3253,7 @@ function App() {
               </div>
 
               <h4 className="subheading">Receptores en fachada</h4>
+
               <label>Fachada</label>
               <select
                 value={Math.min(buildingFacadeIndex, Math.max(0, (selectedObject.points?.length || 1) - 1))}
@@ -3249,17 +3264,101 @@ function App() {
                 ))}
               </select>
 
+              <div className="building-receiver-config">
+                <label>Primera altura [m]
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={selectedObject.receiver_start_height_m ?? 1.5}
+                    onChange={e => patchSelected({ receiver_start_height_m:Math.max(0.1, Number(e.target.value) || 0.1) })}
+                  />
+                </label>
+                <label>Separación vertical [m]
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={selectedObject.receiver_spacing_m ?? 3}
+                    onChange={e => patchSelected({ receiver_spacing_m:Math.max(0.1, Number(e.target.value) || 0.1) })}
+                  />
+                </label>
+                <label>Separación fachada [m]
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={selectedObject.receiver_offset_m ?? 1}
+                    onChange={e => patchSelected({ receiver_offset_m:Math.max(0.1, Number(e.target.value) || 0.1) })}
+                  />
+                </label>
+              </div>
+
               <button
                 type="button"
                 className="profile-open-button"
                 onClick={() => addFacadeReceivers(selectedObject)}
               >
-                Crear receptores cada 3 m
+                Crear receptores
               </button>
 
               <div className="engine-note">
-                Se crean receptores aproximadamente a 1 m de la fachada seleccionada, desde 1,5 m de altura y luego cada 3 m hasta la altura del edificio.
+                Tú defines la primera altura, la separación vertical y la distancia respecto de la fachada. Los receptores se nombran automáticamente RE1, RE2, RE3…
               </div>
+
+              <h4 className="subheading">Receptores asociados</h4>
+              {receivers.filter(receiver => receiver.building_id === selectedObject.id).length === 0 ? (
+                <div className="building-receiver-empty">Aún no hay receptores asociados a este edificio.</div>
+              ) : (
+                <div className="building-receiver-list">
+                  {receivers
+                    .filter(receiver => receiver.building_id === selectedObject.id)
+                    .map(receiver => (
+                      <div className="building-receiver-row" key={receiver.id}>
+                        <input
+                          type="text"
+                          value={receiver.name}
+                          title="Nombre del receptor"
+                          onChange={e => setReceivers(prev => prev.map(item =>
+                            item.id === receiver.id ? { ...item, name:e.target.value } : item
+                          ))}
+                        />
+                        <label>
+                          <span>Altura</span>
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={receiver.height_m}
+                            onChange={e => setReceivers(prev => prev.map(item =>
+                              item.id === receiver.id
+                                ? { ...item, height_m:Math.max(0.1, Number(e.target.value) || 0.1), height_mode:'facade' }
+                                : item
+                            ))}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="building-receiver-visibility"
+                          title={receiver.visible === false ? 'Mostrar receptor' : 'Ocultar receptor'}
+                          onClick={() => setReceivers(prev => prev.map(item =>
+                            item.id === receiver.id ? { ...item, visible:item.visible === false } : item
+                          ))}
+                        >
+                          {receiver.visible === false ? '○' : '●'}
+                        </button>
+                        <button
+                          type="button"
+                          className="building-receiver-delete"
+                          title="Eliminar receptor"
+                          onClick={() => setReceivers(prev => prev.filter(item => item.id !== receiver.id))}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
             </>
           )}
 
