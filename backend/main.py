@@ -766,6 +766,26 @@ def barrier_profile(payload: BarrierProfileRequest):
         max_barrier_db=payload.settings.max_barrier_db,
     )
 
+    profile_settings = PropagationSettings(
+        alpha_db_per_km=payload.settings.alpha_db_per_km,
+        frequency_hz=payload.settings.frequency_hz,
+        max_barrier_db=payload.settings.max_barrier_db,
+        temperature_c=payload.settings.temperature_c,
+        humidity_pct=payload.settings.humidity_pct,
+    )
+    profile_settings.a_weighting = payload.settings.a_weighting
+
+    receiver_projection = _source_spectral_result(
+        s,
+        r.lat,
+        r.lon,
+        r.height_m,
+        [barrier_model],
+        profile_settings,
+        lat0,
+        lon0,
+    )
+
     return {
         "intersects": bool(hit),
         "blocked": bool(hit and b.height_m > los_z),
@@ -782,6 +802,14 @@ def barrier_profile(payload: BarrierProfileRequest):
         "selected_frequency_hz": float(selected_frequency),
         "selected_attenuation_db": round(float(selected_attenuation), 2),
         "attenuation_by_band_db": attenuation_by_band,
+        "receiver_level_db": (
+            round(float(receiver_projection["total_db"]), 2)
+            if receiver_projection.get("total_db") is not None
+            and np.isfinite(receiver_projection["total_db"])
+            else None
+        ),
+        "receiver_bands_db": receiver_projection.get("bands_db", {}),
+        "receiver_mode": receiver_projection.get("mode"),
     }
 
 
