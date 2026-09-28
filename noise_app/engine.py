@@ -44,6 +44,8 @@ class PropagationSettings:
     alpha_db_per_km: float = 2.0
     frequency_hz: float = 500.0
     max_barrier_db: float = 20.0
+    temperature_c: float = 15.0
+    humidity_pct: float = 70.0
 
 
 def latlon_to_xy(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
@@ -71,6 +73,58 @@ def geometric_divergence_db(distance_m: float) -> float:
 
 def atmospheric_absorption_db(distance_m: float, alpha_db_per_km: float) -> float:
     return max(0.0, float(alpha_db_per_km)) * max(0.0, float(distance_m)) / 1000.0
+
+
+
+def atmospheric_absorption_iso9613_db_per_m(
+    frequency_hz: float,
+    temperature_c: float = 15.0,
+    humidity_pct: float = 70.0,
+    pressure_kpa: float = 101.325,
+) -> float:
+    """
+    Atmospheric absorption coefficient approximation based on ISO 9613-1
+    relaxation-frequency equations, returned in dB/m.
+
+    This supports frequency-dependent educational propagation. It does not
+    replace formal validation against a certified implementation.
+    """
+    f = max(float(frequency_hz), 1.0)
+    t = float(temperature_c) + 273.15
+    t0 = 293.15
+    t01 = 273.16
+    p = max(float(pressure_kpa), 1e-6)
+    p0 = 101.325
+    rh = min(100.0, max(0.0, float(humidity_pct)))
+
+    # Molar concentration of water vapour (ISO-style formulation).
+    h = rh * (10.0 ** (-6.8346 * ((t01 / t) ** 1.261) + 4.6151)) * (p0 / p)
+
+    fr_o = (p / p0) * (
+        24.0 + 4.04e4 * h * (0.02 + h) / max(0.391 + h, 1e-12)
+    )
+    fr_n = (p / p0) * ((t / t0) ** -0.5) * (
+        9.0
+        + 280.0
+        * h
+        * math.exp(-4.17 * (((t / t0) ** (-1.0 / 3.0)) - 1.0))
+    )
+
+    classical = 1.84e-11 * (p0 / p) * math.sqrt(t / t0)
+    oxygen = (
+        0.01275
+        * math.exp(-2239.1 / t)
+        / max(fr_o + (f * f / max(fr_o, 1e-12)), 1e-12)
+    )
+    nitrogen = (
+        0.1068
+        * math.exp(-3352.0 / t)
+        / max(fr_n + (f * f / max(fr_n, 1e-12)), 1e-12)
+    )
+    molecular = ((t / t0) ** -2.5) * (oxygen + nitrogen)
+
+    alpha_np_per_m = (f * f) * (classical + molecular)
+    return 8.686 * alpha_np_per_m
 
 
 def energetic_sum_db(levels_db: Iterable[float]) -> float:
