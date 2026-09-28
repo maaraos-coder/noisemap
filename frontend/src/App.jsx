@@ -2196,7 +2196,15 @@ function App() {
                         <tr key={`${row.id}-${contribution.source_id}`}>
                           <td>{row.name}</td>
                           <td>{contribution.source_name}</td>
-                          <td>{contribution.mode === 'octaves' ? 'Octavas' : contribution.mode === 'single' ? 'Single' : 'Broadband'}</td>
+                          <td>{
+                            contribution.source_kind === 'road'
+                              ? 'Tráfico vial'
+                              : contribution.mode === 'octaves'
+                                ? 'Octavas'
+                                : contribution.mode === 'single'
+                                  ? 'Single'
+                                  : 'Broadband'
+                          }</td>
                           {[63,125,250,500,1000,2000,4000,8000].map(freq => (
                             <td key={freq}>
                               {contribution.bands_db?.[String(freq)] != null
@@ -2808,7 +2816,7 @@ function App() {
               >
                 Ver perfil acústico F–B–R
               </button>
-              <div className="engine-note">La atenuación por barrera se calcula con la geometría F–B–R y depende de la frecuencia. Las reflexiones de superficie siguen almacenadas pero aún no forman parte del motor físico.</div>
+              <div className="engine-note">La atenuación por barrera se calcula con la geometría F–B–R y depende de la frecuencia. La reflexión de primer orden está activa cuando la superficie tiene reflectividad mayor que 0%.</div>
             </>
           )}
 
@@ -2830,7 +2838,7 @@ function App() {
                 <strong>{selectedObject.points.length}</strong>
               </div>
               <div className="engine-note">
-                Esta curva representa una cota del terreno. En la siguiente etapa se usará junto con las demás curvas para interpolar la superficie topográfica y obtener perfiles F–R.
+                Esta curva participa en la interpolación del terreno utilizada para las cotas de fuentes, vías, receptores y barreras.
               </div>
             </>
           )}
@@ -3113,7 +3121,7 @@ function App() {
       )}
 
       <footer className="map-footer">
-        Motor educativo · No sustituye una implementación validada de ISO 9613-2
+        Emisión vial CNOSSOS-EU + motor de propagación exterior educativo · no constituye una cadena normativa CNOSSOS completa
       </footer>
     </div>
   )
