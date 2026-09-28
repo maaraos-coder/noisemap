@@ -1107,15 +1107,24 @@ function App() {
               </select>
             </label>
 
-            <div className="scale-settings">
-              <label>
-                Mínimo
-                <input type="number" value={vmin} onChange={e => setVmin(Number(e.target.value))} />
-              </label>
-              <label>
-                Máximo
-                <input type="number" value={vmax} onChange={e => setVmax(Number(e.target.value))} />
-              </label>
+            <div className="scale-section">
+              <div className="scale-section-title">
+                Escala de colores
+                <span>{globalSettings.a_weighting ? 'dB(A)' : 'dB'}</span>
+              </div>
+              <div className="scale-settings">
+                <label>
+                  Límite inferior
+                  <input type="number" value={vmin} onChange={e => setVmin(Number(e.target.value))} />
+                </label>
+                <label>
+                  Límite superior
+                  <input type="number" value={vmax} onChange={e => setVmax(Number(e.target.value))} />
+                </label>
+              </div>
+              <div className="scale-help">
+                Solo define los colores del mapa; no limita el cálculo acústico.
+              </div>
             </div>
 
             <button
