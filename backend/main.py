@@ -26,6 +26,9 @@ from noise_app.engine import (
     energetic_sum_db,
     level_at_point,
     point_in_polygon,
+    latlon_to_xy,
+    segment_intersection,
+    barrier_attenuation_db,
 )
 
 
@@ -564,6 +567,13 @@ class CalculationRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
+class BarrierProfileRequest(BaseModel):
+    source: SourceIn
+    receiver: ReceiverIn
+    barrier: BarrierIn
+    settings: GridSettings = GridSettings()
+
+
 class CalculationResponse(BaseModel):
     bounds: List[List[float]]
     levels: List[List[Optional[float]]]
@@ -675,6 +685,103 @@ def geocode(q: str):
             for item in payload
             if "lat" in item and "lon" in item
         ]
+    }
+
+
+
+@app.post("/api/barrier-profile")
+def barrier_profile(payload: BarrierProfileRequest):
+    s = payload.source
+    r = payload.receiver
+    b = payload.barrier
+
+    lat0 = (s.lat + r.lat + b.lat_a + b.lat_b) / 4.0
+    lon0 = (s.lon + r.lon + b.lon_a + b.lon_b) / 4.0
+
+    sx, sy = latlon_to_xy(s.lat, s.lon, lat0, lon0)
+    rx, ry = latlon_to_xy(r.lat, r.lon, lat0, lon0)
+    ax, ay = latlon_to_xy(b.lat_a, b.lon_a, lat0, lon0)
+    bx, by = latlon_to_xy(b.lat_b, b.lon_b, lat0, lon0)
+
+    horizontal_total = math.hypot(rx - sx, ry - sy)
+    hit, t, _ = segment_intersection((sx, sy), (rx, ry), (ax, ay), (bx, by))
+
+    if hit:
+        barrier_x = max(0.0, min(horizontal_total, horizontal_total * t))
+        los_z = s.height_m + t * (r.height_m - s.height_m)
+    else:
+        # For visualization only, project barrier midpoint onto the source-receiver axis.
+        mx = (ax + bx) / 2.0
+        my = (ay + by) / 2.0
+        vx, vy = rx - sx, ry - sy
+        denom = max(vx * vx + vy * vy, 1e-12)
+        proj_t = ((mx - sx) * vx + (my - sy) * vy) / denom
+        proj_t = max(0.0, min(1.0, proj_t))
+        barrier_x = horizontal_total * proj_t
+        los_z = s.height_m + proj_t * (r.height_m - s.height_m)
+
+    d1_h = barrier_x
+    d2_h = max(0.0, horizontal_total - barrier_x)
+    direct = math.sqrt(horizontal_total ** 2 + (r.height_m - s.height_m) ** 2)
+    via_top = (
+        math.sqrt(d1_h ** 2 + (b.height_m - s.height_m) ** 2)
+        + math.sqrt(d2_h ** 2 + (b.height_m - r.height_m) ** 2)
+    )
+    delta = max(0.0, via_top - direct) if hit and b.height_m > los_z else 0.0
+
+    barrier_model = Barrier(
+        name=b.name,
+        lat_a=b.lat_a,
+        lon_a=b.lon_a,
+        lat_b=b.lat_b,
+        lon_b=b.lon_b,
+        height_m=b.height_m,
+        enabled=b.enabled,
+    )
+
+    attenuation_by_band = {}
+    for band in OCTAVE_BANDS:
+        attenuation_by_band[str(band)] = round(
+            barrier_attenuation_db(
+                sx, sy, s.height_m,
+                rx, ry, r.height_m,
+                barrier_model,
+                lat0, lon0,
+                frequency_hz=float(band),
+                max_barrier_db=payload.settings.max_barrier_db,
+            ),
+            2,
+        )
+
+    selected_frequency = (
+        s.single_frequency_hz if s.spectrum_mode == "single"
+        else payload.settings.frequency_hz
+    )
+    selected_attenuation = barrier_attenuation_db(
+        sx, sy, s.height_m,
+        rx, ry, r.height_m,
+        barrier_model,
+        lat0, lon0,
+        frequency_hz=float(selected_frequency),
+        max_barrier_db=payload.settings.max_barrier_db,
+    )
+
+    return {
+        "intersects": bool(hit),
+        "blocked": bool(hit and b.height_m > los_z),
+        "source_height_m": s.height_m,
+        "receiver_height_m": r.height_m,
+        "barrier_height_m": b.height_m,
+        "horizontal_total_m": round(horizontal_total, 3),
+        "source_to_barrier_m": round(d1_h, 3),
+        "barrier_to_receiver_m": round(d2_h, 3),
+        "los_height_at_barrier_m": round(los_z, 3),
+        "direct_path_m": round(direct, 3),
+        "diffracted_path_m": round(via_top, 3),
+        "path_difference_m": round(delta, 4),
+        "selected_frequency_hz": float(selected_frequency),
+        "selected_attenuation_db": round(float(selected_attenuation), 2),
+        "attenuation_by_band_db": attenuation_by_band,
     }
 
 
