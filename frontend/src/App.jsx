@@ -549,6 +549,30 @@ function App() {
     setSelected(null)
   }
 
+  useEffect(() => {
+    const handleKeyDown = event => {
+      const activeTag = document.activeElement?.tagName
+      const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
+
+      if (event.key === 'Escape') {
+        if (barrierStart || lineStart || draftPolygon.length) {
+          cancelDrawing()
+        } else if (selected) {
+          setSelected(null)
+        }
+        return
+      }
+
+      if (event.key === 'Delete' && selected && !editing) {
+        event.preventDefault()
+        removeSelected()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selected, barrierStart, lineStart, draftPolygon])
+
   const imageCoordinates = result?.bounds
     ? [
         [result.bounds[0][1], result.bounds[1][0]],
@@ -640,6 +664,23 @@ function App() {
               }}
             />
           </Source>
+        )}
+
+        {mode === 'barrier' && barrierStart && barrierHover && (
+          <Marker
+            longitude={barrierHover[1]}
+            latitude={barrierHover[0]}
+            anchor="bottom-left"
+          >
+            <div className="barrier-live-measure">
+              {haversineMeters(
+                barrierStart[0],
+                barrierStart[1],
+                barrierHover[0],
+                barrierHover[1]
+              ).toFixed(1)} m
+            </div>
+          </Marker>
         )}
 
         {layers.barriers && (
@@ -826,6 +867,17 @@ function App() {
             <span className="calc-icon">▶</span>
             <span>{calculating ? 'Calculando…' : dirty ? 'Calcular mapa' : 'Mapa actualizado'}</span>
           </button>
+          {selectedObject && (
+            <button
+              type="button"
+              className="bottom-delete"
+              onClick={removeSelected}
+              title="Eliminar objeto seleccionado (Supr/Delete)"
+            >
+              <span className="delete-icon">⌫</span>
+              <span>Eliminar</span>
+            </button>
+          )}
         </div>
 
         {mode === 'area' && draftPolygon.length >= 3 && (
