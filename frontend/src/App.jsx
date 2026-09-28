@@ -622,6 +622,11 @@ function App() {
       return
     }
 
+    if (mode === 'building') {
+      setBuildingDraft(prev => [...prev, [lat, lng]])
+      return
+    }
+
     if (mode === 'area') {
       setDraftPolygon(prev => [...prev, [lat, lng]])
     }
@@ -644,6 +649,7 @@ function App() {
         sources,
         receivers,
         barriers,
+        buildings,
         roads,
         accessories,
         contours,
@@ -696,6 +702,7 @@ function App() {
       setSources(data.sources)
       setReceivers(data.receivers)
       setBarriers(Array.isArray(data.barriers) ? data.barriers : [])
+      setBuildings(Array.isArray(data.buildings) ? data.buildings : [])
       setRoads(Array.isArray(data.roads) ? data.roads : [])
       setAccessories(Array.isArray(data.accessories) ? data.accessories : [])
       setContours(Array.isArray(data.contours) ? data.contours : [])
@@ -985,6 +992,65 @@ function App() {
     setMode('navigate')
   }
 
+  const finishBuilding = () => {
+    if (buildingDraft.length < 3) return
+    const item = {
+      id: crypto.randomUUID(),
+      name: `Edificio ${buildings.length + 1}`,
+      points: buildingDraft,
+      height_m: 10,
+      enabled: true,
+      reflection_percent: 20
+    }
+    setBuildings(prev => [...prev, item])
+    setBuildingDraft([])
+    setBuildingFacadeIndex(0)
+    setSelected({ type: 'building', id: item.id })
+    setMode('navigate')
+  }
+
+  const addFacadeReceivers = building => {
+    const pts = building?.points || []
+    if (pts.length < 3) return
+
+    const edgeIndex = Math.max(0, Math.min(pts.length - 1, Number(buildingFacadeIndex) || 0))
+    const a = pts[edgeIndex]
+    const b = pts[(edgeIndex + 1) % pts.length]
+    const midLat = (Number(a[0]) + Number(b[0])) / 2
+    const midLon = (Number(a[1]) + Number(b[1])) / 2
+
+    const centroidLat = pts.reduce((sum, point) => sum + Number(point[0]), 0) / pts.length
+    const centroidLon = pts.reduce((sum, point) => sum + Number(point[1]), 0) / pts.length
+    let dLat = midLat - centroidLat
+    let dLon = (midLon - centroidLon) * Math.cos(midLat * Math.PI / 180)
+    const norm = Math.hypot(dLat, dLon) || 1
+    dLat /= norm
+    dLon /= norm
+
+    // Place receptor approximately 1 m outside the selected facade.
+    const metersPerDegLat = 111320
+    const lat = midLat + dLat / metersPerDegLat
+    const lon = midLon + dLon / (metersPerDegLat * Math.max(Math.cos(midLat * Math.PI / 180), 0.2))
+
+    const maxHeight = Math.max(1.5, Number(building.height_m) || 10)
+    const newReceivers = []
+    for (let h = 1.5; h <= maxHeight + 0.001; h += 3) {
+      newReceivers.push({
+        id: crypto.randomUUID(),
+        name: `${building.name} · F${edgeIndex + 1} · ${h.toFixed(1)} m`,
+        lat,
+        lon,
+        height_m: Number(h.toFixed(1)),
+        visible: true,
+        height_mode: 'facade',
+        building_id: building.id,
+        facade_index: edgeIndex
+      })
+    }
+
+    setReceivers(prev => [...prev, ...newReceivers])
+  }
+
   const finishArea = () => {
     if (draftPolygon.length >= 3) {
       setPolygon(draftPolygon)
@@ -995,6 +1061,7 @@ function App() {
 
   const cancelDrawing = () => {
     setDraftPolygon([])
+    setBuildingDraft([])
     setContourDraft([])
     setRoadDraft([])
     setBarrierStart(null)
@@ -1055,6 +1122,7 @@ function App() {
       points.push([Number(item.lon_a), Number(item.lat_a)])
       points.push([Number(item.lon_b), Number(item.lat_b)])
     })
+    buildings.forEach(item => item.points?.forEach(([lat, lon]) => points.push([Number(lon), Number(lat)])))
     roads.forEach(item => item.points?.forEach(([lat, lon]) => points.push([Number(lon), Number(lat)])))
     accessories.forEach(item => {
       points.push([Number(item.lon_a), Number(item.lat_a)])
