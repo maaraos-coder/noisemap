@@ -469,7 +469,25 @@ function App() {
 
   useEffect(() => {
     setDirty(true)
-  }, [sources, barriers, contours, polygon, resolution, height, alpha, frequency, vmin, vmax, globalSettings])
+  }, [sources, receivers, barriers, polygon, resolution, height, alpha, frequency, globalSettings])
+
+  useEffect(() => {
+    // Wake the free Render instance in the background as soon as the app opens.
+    // This reduces the wait when the user performs the first calculation.
+    let cancelled = false
+    const wake = async () => {
+      try {
+        await fetch(`${API_BASE}/api/health`, {
+          method: 'GET',
+          cache: 'no-store'
+        })
+      } catch (error) {
+        if (!cancelled) console.debug('Backend warm-up pendiente:', error)
+      }
+    }
+    wake()
+    return () => { cancelled = true }
+  }, [])
 
   const onMapMouseMove = event => {
     if (mode === 'barrier' && barrierStart) {
@@ -1711,8 +1729,8 @@ function App() {
       </div>
 
       {dirty && result && (
-        <div className="dirty-chip floating-dirty" title="Hay cambios que aún no están reflejados en el mapa calculado">
-          ● Cambios sin calcular
+        <div className="dirty-chip floating-dirty" title="Cambió la geometría o un parámetro acústico y el mapa necesita actualizarse">
+          ● Recalcular mapa
         </div>
       )}
 
