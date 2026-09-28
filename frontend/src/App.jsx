@@ -743,7 +743,7 @@ function App() {
             <div className="technical-marker source-marker" title={source.name}>
               <span className="source-wave wave-a" />
               <span className="source-wave wave-b" />
-              <span className="source-core">S</span>
+              <span className="source-core">F</span>
             </div>
           </Marker>
         ))}
@@ -848,8 +848,8 @@ function App() {
         <div className="object-toolbar-title">Agregar objetos</div>
         <div className="object-toolbar-actions">
           <IconButton active={mode === 'navigate'} title="Seleccionar / navegar" icon="✥" label="Seleccionar" onClick={() => setMode('navigate')} />
-          <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
-          <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
+          <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente (F)" onClick={() => setMode('source')} />
+          <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor (R)" onClick={() => setMode('receiver')} />
           <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
           <IconButton active={mode === 'line'} title="Auxiliar gráfico: solo dibujo, no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => setMode('line')} />
           <IconButton active={mode === 'area'} title="Dibujar área de cálculo" icon="▱" label="Área" onClick={() => {
