@@ -650,6 +650,36 @@ select {
   font-size: 8px;
 }
 
+
+.building-label.compact {
+  min-width: auto;
+  padding: 3px 5px;
+}
+
+.building-label.compact strong {
+  font-size: 8px;
+}
+
+.building-label.dot-only {
+  min-width: 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(63,74,85,.92);
+  border-color: #fff;
+  color: #fff;
+}
+
+.building-label-dot {
+  margin: 0 !important;
+  color: #fff !important;
+  font-size: 9px !important;
+  font-weight: 900;
+}
+
 .building-drawing-guide {
   border-color: rgba(79,89,100,.28);
 }
