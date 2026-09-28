@@ -407,6 +407,7 @@ function App() {
 
   const [result, setResult] = useState(null)
   const [calculating, setCalculating] = useState(false)
+  const [calculationStatus, setCalculationStatus] = useState('')
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -697,6 +698,7 @@ function App() {
     setMode('navigate')
     setDraftPolygon([])
     setCalculating(true)
+    setCalculationStatus('Preparando cálculo…')
 
     const payload = {
       sources,
@@ -744,22 +746,67 @@ function App() {
     }
 
     try {
-      let data
-      try {
-        data = await runRequest()
-      } catch (firstError) {
-        const retryable = !firstError.status || [502, 503, 504].includes(firstError.status)
-        if (!retryable) throw firstError
+      // Render Free may need ~50 s to wake after inactivity.
+      // Probe health first and keep retrying transient 502/503/504 responses.
+      const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-        await new Promise(resolve => setTimeout(resolve, 2500))
-        data = await runRequest()
+      const wakeBackend = async () => {
+        const delays = [0, 8000, 12000, 15000, 18000]
+        let lastError = null
+
+        for (let i = 0; i < delays.length; i += 1) {
+          if (delays[i]) await wait(delays[i])
+          setCalculationStatus(
+            i === 0
+              ? 'Iniciando motor acústico…'
+              : `Despertando servidor… intento ${i + 1}/${delays.length}`
+          )
+
+          try {
+            const health = await fetch(`${API_BASE}/api/health`, {
+              method: 'GET',
+              cache: 'no-store'
+            })
+            if (health.ok) return
+            lastError = new Error(`Health HTTP ${health.status}`)
+          } catch (error) {
+            lastError = error
+          }
+        }
+
+        throw lastError || new Error('El servidor no respondió al iniciar.')
       }
+
+      await wakeBackend()
+      setCalculationStatus('Calculando mapa de ruido…')
+
+      let data
+      const requestDelays = [0, 5000, 10000]
+      let lastError = null
+
+      for (let i = 0; i < requestDelays.length; i += 1) {
+        if (requestDelays[i]) await wait(requestDelays[i])
+        try {
+          data = await runRequest()
+          lastError = null
+          break
+        } catch (error) {
+          lastError = error
+          const retryable = !error.status || [502, 503, 504].includes(error.status)
+          if (!retryable) throw error
+          setCalculationStatus(`Reintentando cálculo… ${i + 2}/${requestDelays.length}`)
+        }
+      }
+
+      if (!data) throw lastError || new Error('No se recibió respuesta del motor.')
 
       setPolygon(cleanPolygon)
       setResult(data)
       setDirty(false)
+      setCalculationStatus('')
     } catch (error) {
       console.error('Error al calcular mapa:', error)
+      setCalculationStatus('')
       alert(`No fue posible calcular el mapa. ${error.message || 'Error desconocido.'}`)
     } finally {
       setCalculating(false)
@@ -1560,7 +1607,7 @@ function App() {
             title="Calcular o actualizar el mapa de ruido"
           >
             <span className="calc-icon">▶</span>
-            <span>{calculating ? 'Calculando…' : dirty ? 'Calcular mapa' : 'Mapa actualizado'}</span>
+            <span>{calculating ? (calculationStatus || 'Calculando…') : dirty ? 'Calcular mapa' : 'Mapa actualizado'}</span>
           </button>
           {selectedObject && (
             <button
@@ -2131,7 +2178,7 @@ function App() {
               disabled={calculating}
               onClick={calculate}
             >
-              {calculating ? 'Calculando…' : dirty ? 'ACTUALIZAR MAPA' : 'MAPA ACTUALIZADO'}
+              {calculating ? (calculationStatus || 'Calculando…') : dirty ? 'ACTUALIZAR MAPA' : 'MAPA ACTUALIZADO'}
             </button>
 
             <div className="summary-row">
