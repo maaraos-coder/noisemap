@@ -39,6 +39,7 @@ class Barrier:
     height_m: float = 3.0
     enabled: bool = True
     ground_elevation_m: float = 0.0
+    reflection_percent: float = 0.0
 
 
 @dataclass
@@ -49,6 +50,7 @@ class PropagationSettings:
     temperature_c: float = 15.0
     humidity_pct: float = 70.0
     ground_factor: float = 0.0
+    reflections_enabled: bool = False
 
 
 def latlon_to_xy(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
@@ -184,6 +186,75 @@ def segment_intersection(
     return (0.0 <= t <= 1.0 and 0.0 <= u <= 1.0), t, u
 
 
+def first_order_reflection_level_db(
+    source: Source,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_height_m: float,
+    barrier: Barrier,
+    settings: PropagationSettings,
+    lat0: float,
+    lon0: float,
+    receiver_ground_elevation_m: float = 0.0,
+) -> float:
+    """Single specular reflection from a vertical finite barrier using image-source geometry."""
+    if not barrier.enabled or barrier.reflection_percent <= 0.0:
+        return float("-inf")
+
+    sx, sy = latlon_to_xy(source.lat, source.lon, lat0, lon0)
+    rx, ry = latlon_to_xy(receiver_lat, receiver_lon, lat0, lon0)
+    ax, ay = latlon_to_xy(barrier.lat_a, barrier.lon_a, lat0, lon0)
+    bx, by = latlon_to_xy(barrier.lat_b, barrier.lon_b, lat0, lon0)
+
+    wx, wy = bx - ax, by - ay
+    wall_len2 = wx * wx + wy * wy
+    if wall_len2 < 1e-9:
+        return float("-inf")
+
+    # Source and receiver must be on the same side of the reflecting plane.
+    side_s = _cross(wx, wy, sx - ax, sy - ay)
+    side_r = _cross(wx, wy, rx - ax, ry - ay)
+    if side_s * side_r <= 0.0:
+        return float("-inf")
+
+    # Mirror source across the infinite line containing the barrier.
+    tproj = ((sx - ax) * wx + (sy - ay) * wy) / wall_len2
+    px, py = ax + tproj * wx, ay + tproj * wy
+    isx, isy = 2.0 * px - sx, 2.0 * py - sy
+
+    hit, t_img, u_wall = segment_intersection(
+        (isx, isy), (rx, ry), (ax, ay), (bx, by)
+    )
+    if not hit or not (0.0 <= u_wall <= 1.0):
+        return float("-inf")
+
+    source_z = source.ground_elevation_m + source.height_m
+    receiver_z = receiver_ground_elevation_m + receiver_height_m
+    reflection_z = source_z + t_img * (receiver_z - source_z)
+    barrier_bottom_z = barrier.ground_elevation_m
+    barrier_top_z = barrier_bottom_z + barrier.height_m
+    if reflection_z < barrier_bottom_z or reflection_z > barrier_top_z:
+        return float("-inf")
+
+    reflected_distance = math.sqrt(
+        (rx - isx) ** 2 + (ry - isy) ** 2 + (receiver_z - source_z) ** 2
+    )
+    reflected_distance = max(1.0, reflected_distance)
+
+    a_div = geometric_divergence_db(reflected_distance)
+    a_atm = atmospheric_absorption_db(reflected_distance, settings.alpha_db_per_km)
+    a_gr = ground_attenuation_db(
+        reflected_distance,
+        source.height_m,
+        receiver_height_m,
+        settings.ground_factor,
+    )
+    reflection_fraction = min(1.0, max(1e-6, barrier.reflection_percent / 100.0))
+    reflection_loss_db = -10.0 * math.log10(reflection_fraction)
+
+    return source.lw_db + source.dc_db - a_div - a_atm - a_gr - reflection_loss_db
+
+
 def barrier_attenuation_db(
     sx: float,
     sy: float,
@@ -280,7 +351,28 @@ def source_to_point_breakdown(
         settings.ground_factor,
     )
 
-    lp = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar
+    lp_direct = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar
+
+    reflected_levels = []
+    if settings.reflections_enabled:
+        reflected_levels = [
+            first_order_reflection_level_db(
+                source,
+                receiver_lat,
+                receiver_lon,
+                receiver_height_m,
+                b,
+                settings,
+                lat0,
+                lon0,
+                receiver_ground_elevation_m=receiver_ground_elevation_m,
+            )
+            for b in barriers
+            if b.enabled and b.reflection_percent > 0.0
+        ]
+    finite_reflections = [v for v in reflected_levels if np.isfinite(v)]
+    lp_reflected = energetic_sum_db(finite_reflections) if finite_reflections else float("-inf")
+    lp = energetic_sum_db([lp_direct] + finite_reflections)
 
     return {
         "distance_m": distance_m,
@@ -290,6 +382,9 @@ def source_to_point_breakdown(
         "a_atm_db": a_atm,
         "a_gr_db": a_gr,
         "a_bar_db": a_bar,
+        "lp_direct_db": lp_direct,
+        "lp_reflected_db": lp_reflected,
+        "reflection_count": len(finite_reflections),
         "source_ground_elevation_m": source.ground_elevation_m,
         "receiver_ground_elevation_m": receiver_ground_elevation_m,
         "lp_db": lp,
