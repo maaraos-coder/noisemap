@@ -847,6 +847,32 @@ function App() {
     globalSettings
   ])
 
+  const updateProfileBarrierHeight = value => {
+    if (selected?.type !== 'barrier') return
+    const heightValue = Math.max(0, Number(value) || 0)
+    setBarriers(prev => prev.map(item =>
+      item.id === selected.id ? { ...item, height_m: heightValue } : item
+    ))
+  }
+
+  const updateProfileReceiverHeight = value => {
+    if (!profileReceiverId) return
+    const heightValue = Math.max(0, Number(value) || 0)
+    setReceivers(prev => prev.map(item =>
+      item.id === profileReceiverId
+        ? { ...item, height_m: heightValue, height_mode: 'specify' }
+        : item
+    ))
+  }
+
+  const updateProfileSourceHeight = value => {
+    if (!profileSourceId) return
+    const heightValue = Math.max(0, Number(value) || 0)
+    setSources(prev => prev.map(item =>
+      item.id === profileSourceId ? { ...item, height_m: heightValue } : item
+    ))
+  }
+
   const selectedReceiverResult = selected?.type === 'receiver'
     ? result?.receiver_results?.find(item => item.id === selected.id)
     : null
@@ -2211,6 +2237,85 @@ function App() {
             </label>
           </div>
 
+          {selected?.type === 'barrier' && (() => {
+            const activeSource = sources.find(item => item.id === profileSourceId)
+            const activeReceiver = receivers.find(item => item.id === profileReceiverId)
+            const activeBarrier = barriers.find(item => item.id === selected.id)
+            if (!activeSource || !activeReceiver || !activeBarrier) return null
+            return (
+              <div className="profile-height-controls">
+                <label>
+                  Altura fuente
+                  <div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeSource.height_m}
+                      onChange={e => updateProfileSourceHeight(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeSource.height_m}
+                      onChange={e => updateProfileSourceHeight(e.target.value)}
+                    />
+                    <span>m</span>
+                  </div>
+                </label>
+
+                <label>
+                  Altura barrera
+                  <div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeBarrier.height_m}
+                      onChange={e => updateProfileBarrierHeight(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeBarrier.height_m}
+                      onChange={e => updateProfileBarrierHeight(e.target.value)}
+                    />
+                    <span>m</span>
+                  </div>
+                </label>
+
+                <label>
+                  Altura receptor
+                  <div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeReceiver.height_m}
+                      onChange={e => updateProfileReceiverHeight(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={activeReceiver.height_m}
+                      onChange={e => updateProfileReceiverHeight(e.target.value)}
+                    />
+                    <span>m</span>
+                  </div>
+                </label>
+              </div>
+            )
+          })()}
+
           {barrierProfileLoading && <div className="profile-loading">Actualizando perfil…</div>}
 
           {barrierProfile && (() => {
@@ -2289,7 +2394,7 @@ function App() {
                 </div>
 
                 <div className="profile-note">
-                  El perfil se actualiza automáticamente al modificar la altura de la fuente, barrera o receptor. La sección usa terreno plano por ahora; cuando conectemos las curvas de nivel al motor, este mismo perfil incorporará la topografía.
+                  Puedes modificar aquí mismo las alturas de fuente, barrera y receptor. Los valores cambian los objetos reales del mapa y el perfil se recalcula automáticamente. La sección usa terreno plano por ahora; cuando conectemos las curvas de nivel al motor, este mismo perfil incorporará la topografía.
                 </div>
               </>
             )
