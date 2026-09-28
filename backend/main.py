@@ -29,6 +29,7 @@ from noise_app.engine import (
     latlon_to_xy,
     segment_intersection,
     barrier_attenuation_db,
+    source_to_point_breakdown,
 )
 
 
@@ -737,6 +738,8 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     totals = []
     band_values = {str(b): [] for b in OCTAVE_BANDS}
 
+    diagnostics = []
+
     for source in payload.sources:
         if not source.enabled:
             continue
@@ -751,6 +754,35 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lat0,
             lon0,
         )
+
+        # Explicit 3D geometry diagnostic using the same propagation engine.
+        diagnostic_source = Source(
+            name=source.name,
+            lat=source.lat,
+            lon=source.lon,
+            height_m=source.height_m,
+            lw_db=float(source.lw_db),
+            dc_db=source.dc_db,
+            enabled=source.enabled,
+        )
+        diag = source_to_point_breakdown(
+            diagnostic_source,
+            payload.receiver.lat,
+            payload.receiver.lon,
+            payload.receiver.height_m,
+            barriers,
+            settings,
+            lat0,
+            lon0,
+        )
+        diagnostics.append({
+            "source_id": source.id,
+            "source_name": source.name,
+            "distance_3d_m": round(float(diag["distance_m"]), 3),
+            "a_div_db": round(float(diag["a_div_db"]), 3),
+            "a_atm_db": round(float(diag["a_atm_db"]), 3),
+            "a_bar_db": round(float(diag["a_bar_db"]), 3),
+        })
 
         total = result.get("total_db")
         if total is not None and np.isfinite(total):
@@ -781,6 +813,8 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         "level_db": round(float(total_level), 3) if np.isfinite(total_level) else None,
         "bands_db": bands_db,
         "contributions": contributions,
+        "diagnostics": diagnostics,
+        "receiver_height_m": payload.receiver.height_m,
     }
 
 
