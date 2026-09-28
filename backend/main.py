@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+import json
 
 import numpy as np
 from fastapi import FastAPI
@@ -40,6 +43,11 @@ class SourceIn(BaseModel):
     lw_db: float = 100.0
     dc_db: float = 0.0
     enabled: bool = True
+    spectrum_mode: str = "broadband"
+    single_frequency_hz: float = 500.0
+    octave_levels: Dict[str, float] = {}
+    adjust_db: float = 0.0
+    time_active_pct: float = 100.0
 
 
 class BarrierIn(BaseModel):
@@ -51,6 +59,7 @@ class BarrierIn(BaseModel):
     lon_b: float
     height_m: float = 3.0
     enabled: bool = True
+    reflection_percent: float = 0.0
 
 
 class GridSettings(BaseModel):
@@ -60,6 +69,13 @@ class GridSettings(BaseModel):
     frequency_hz: float = Field(default=500.0, ge=20.0, le=20000.0)
     vmin: float = 35.0
     vmax: float = 80.0
+    prediction_model: str = "ISO 9613-2:2024"
+    a_weighting: bool = True
+    ground_factor: float = Field(default=0.0, ge=0.0, le=1.0)
+    temperature_c: float = 15.0
+    humidity_pct: float = Field(default=70.0, ge=0.0, le=100.0)
+    max_barrier_db: float = 20.0
+    reflections_enabled: bool = False
 
 
 class CalculationRequest(BaseModel):
@@ -79,6 +95,46 @@ class CalculationResponse(BaseModel):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "3.0.0"}
+
+
+
+@app.get("/api/geocode")
+def geocode(q: str):
+    query = q.strip()
+    if not query:
+        return {"results": []}
+
+    params = urlencode({
+        "q": query,
+        "format": "jsonv2",
+        "limit": 5,
+        "addressdetails": 1,
+    })
+    request = Request(
+        f"https://nominatim.openstreetmap.org/search?{params}",
+        headers={
+            "User-Agent": "NoiseMapLab-UC/3.1 (educational acoustic mapping)",
+            "Accept-Language": "es",
+        },
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {"results": []}
+
+    return {
+        "results": [
+            {
+                "display_name": item.get("display_name", ""),
+                "lat": float(item["lat"]),
+                "lon": float(item["lon"]),
+                "type": item.get("type", ""),
+            }
+            for item in payload
+            if "lat" in item and "lon" in item
+        ]
+    }
 
 
 @app.post("/api/calculate", response_model=CalculationResponse)
@@ -107,7 +163,7 @@ def calculate(payload: CalculationRequest):
             lat=s.lat,
             lon=s.lon,
             height_m=s.height_m,
-            lw_db=s.lw_db,
+            lw_db=s.lw_db + s.adjust_db + (10.0 * np.log10(max(s.time_active_pct, 0.001) / 100.0)),
             dc_db=s.dc_db,
             enabled=s.enabled,
         )
@@ -130,7 +186,7 @@ def calculate(payload: CalculationRequest):
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
         frequency_hz=payload.settings.frequency_hz,
-        max_barrier_db=20.0,
+        max_barrier_db=payload.settings.max_barrier_db,
     )
 
     lat0 = sum(lats) / len(lats)
