@@ -2146,6 +2146,10 @@ function App() {
           <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente (F)" onClick={() => setMode('source')} />
           <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor (R)" onClick={() => setMode('receiver')} />
           <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
+          <IconButton active={mode === 'building'} title="Dibujar edificio como obstáculo acústico" icon="▦" label="Edificio" onClick={() => {
+            setBuildingDraft([])
+            setMode('building')
+          }} />
           <IconButton active={mode === 'road'} title="Dibujar eje de una vía con tráfico conocido" icon="🛣" label="Tráfico vial" onClick={() => {
             setRoadDraft([])
             setMode('road')
@@ -2207,6 +2211,18 @@ function App() {
             </button>
           )}
 
+          {mode === 'building' && buildingDraft.length >= 3 && (
+            <button
+              type="button"
+              className="bottom-context-action finish"
+              onClick={finishBuilding}
+              title="Cerrar edificio"
+            >
+              <span className="context-icon">✓</span>
+              <span>Cerrar edificio</span>
+            </button>
+          )}
+
           {mode === 'area' && draftPolygon.length >= 3 && (
             <button
               type="button"
@@ -2219,7 +2235,7 @@ function App() {
             </button>
           )}
 
-          {(mode === 'road' || mode === 'contour' || mode === 'area' || barrierStart || lineStart) && (
+          {(mode === 'road' || mode === 'contour' || mode === 'building' || mode === 'area' || barrierStart || lineStart) && (
             <button
               type="button"
               className="bottom-context-action cancel"
@@ -2255,6 +2271,19 @@ function App() {
         </div>
 
       </div>
+
+      {mode === 'building' && (
+        <div className="area-drawing-guide building-drawing-guide">
+          <strong>Edificio</strong>
+          <span>
+            {buildingDraft.length === 0
+              ? 'Haz clic para marcar el primer vértice del edificio.'
+              : buildingDraft.length < 3
+                ? `Vértice ${buildingDraft.length} definido · agrega al menos ${3 - buildingDraft.length} más.`
+                : `${buildingDraft.length} vértices definidos · pulsa “Cerrar edificio”.`}
+          </span>
+        </div>
+      )}
 
       {mode === 'area' && (
         <div className="area-drawing-guide">
@@ -2369,6 +2398,7 @@ function App() {
             ['sources', 'Fuentes'],
             ['receivers', 'Receptores'],
             ['barriers', 'Barreras'],
+            ['buildings', 'Edificios'],
             ['roads', 'Tráfico vial'],
             ['accessories', 'Líneas auxiliares'],
             ['contours', 'Curvas de nivel'],
@@ -2427,7 +2457,7 @@ function App() {
           </button>
 
           <div className="project-help compact">
-            Conserva fuentes, tráfico vial, receptores, barreras, topografía,
+            Conserva fuentes, tráfico vial, receptores, barreras, edificios, topografía,
             espectros, configuración y último cálculo.
           </div>
 
