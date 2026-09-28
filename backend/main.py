@@ -47,6 +47,32 @@ A_WEIGHTING_DB = {
     8000: -1.1,
 }
 
+# CNOSSOS-EU Table F-1 coefficients, consolidated with (EU) 2021/1226.
+# Rows: AR, BR, AP, BP over octave bands 63 Hz .. 8 kHz.
+CNOSSOS_ROAD_F1 = {
+    "1": (
+        (83.1, 89.2, 87.7, 93.1, 100.1, 96.7, 86.8, 76.2),
+        (30.0, 41.5, 38.9, 25.7, 32.5, 37.2, 39.0, 40.0),
+        (97.9, 92.5, 90.7, 87.2, 84.7, 88.0, 84.4, 77.1),
+        (-1.3, 7.2, 7.7, 8.0, 8.0, 8.0, 8.0, 8.0),
+    ),
+    "2": (
+        (88.7, 93.2, 95.7, 100.9, 101.7, 95.1, 87.8, 83.6),
+        (30.0, 35.8, 32.6, 23.8, 30.1, 36.2, 38.3, 40.1),
+        (105.5, 100.2, 100.5, 98.7, 101.0, 97.8, 91.2, 85.0),
+        (-1.9, 4.7, 6.4, 6.5, 6.5, 6.5, 6.5, 6.5),
+    ),
+    "3": (
+        (91.7, 96.2, 98.2, 104.9, 105.1, 98.5, 91.1, 85.6),
+        (30.0, 33.5, 31.3, 25.4, 31.8, 37.1, 38.6, 40.6),
+        (108.8, 104.2, 103.5, 102.9, 102.6, 98.5, 93.8, 87.5),
+        (0.0, 3.0, 4.6, 5.0, 5.0, 5.0, 5.0, 5.0),
+    ),
+}
+CNOSSOS_TEMP_K = {"1": 0.08, "2": 0.04, "3": 0.04}
+CNOSSOS_REF_SPEED = 70.0
+CNOSSOS_SOURCE_HEIGHT_M = 0.05
+
 
 def _source_adjustment_db(source) -> float:
     duty = max(float(source.time_active_pct), 0.001) / 100.0
@@ -550,6 +576,22 @@ class SourceIn(BaseModel):
     octave_levels: Dict[str, float] = {}
     adjust_db: float = 0.0
     time_active_pct: float = 100.0
+    parent_id: Optional[str] = None
+    parent_name: Optional[str] = None
+    source_kind: str = "point"
+
+
+class RoadIn(BaseModel):
+    id: str
+    name: str
+    points: List[List[float]]
+    enabled: bool = True
+    q_light_vph: float = Field(default=800.0, ge=0.0)
+    q_medium_vph: float = Field(default=40.0, ge=0.0)
+    q_heavy_vph: float = Field(default=30.0, ge=0.0)
+    speed_light_kmh: float = Field(default=50.0, gt=0.0)
+    speed_medium_kmh: float = Field(default=50.0, gt=0.0)
+    speed_heavy_kmh: float = Field(default=50.0, gt=0.0)
 
 
 class BarrierIn(BaseModel):
@@ -599,6 +641,7 @@ class ContourIn(BaseModel):
 
 class CalculationRequest(BaseModel):
     sources: List[SourceIn]
+    roads: List[RoadIn] = []
     receivers: List[ReceiverIn] = []
     barriers: List[BarrierIn] = []
     contours: List[ContourIn] = []
@@ -616,6 +659,7 @@ class BarrierProfileRequest(BaseModel):
 
 class ReceiverPreviewRequest(BaseModel):
     sources: List[SourceIn] = []
+    roads: List[RoadIn] = []
     receiver: ReceiverIn
     barriers: List[BarrierIn] = []
     contours: List[ContourIn] = []
@@ -665,6 +709,167 @@ def _terrain_elevation(samples, lat: float, lon: float, lat0: float, lon0: float
     idx = np.argpartition(dist2, k - 1)[:k] if k < len(zs) else np.arange(len(zs))
     weights = 1.0 / np.maximum(dist2[idx], 1.0)
     return float(np.sum(weights * zs[idx]) / np.sum(weights))
+
+
+
+def _cnossos_vehicle_spectrum(category: str, speed_kmh: float, temperature_c: float) -> np.ndarray:
+    ar, br, ap, bp = CNOSSOS_ROAD_F1[category]
+    v_true = max(float(speed_kmh), 0.1)
+    v = max(v_true, 20.0)
+    log_speed = math.log10(v / CNOSSOS_REF_SPEED)
+
+    rolling = np.asarray(ar, dtype=float) + np.asarray(br, dtype=float) * log_speed
+    rolling += CNOSSOS_TEMP_K[category] * (20.0 - float(temperature_c))
+
+    propulsion = (
+        np.asarray(ap, dtype=float)
+        + np.asarray(bp, dtype=float) * ((v - CNOSSOS_REF_SPEED) / CNOSSOS_REF_SPEED)
+    )
+
+    energy = np.power(10.0, rolling / 10.0) + np.power(10.0, propulsion / 10.0)
+    return 10.0 * np.log10(energy)
+
+
+def _cnossos_road_line_spectrum(road: RoadIn, temperature_c: float) -> np.ndarray:
+    flows = (
+        ("1", road.q_light_vph, road.speed_light_kmh),
+        ("2", road.q_medium_vph, road.speed_medium_kmh),
+        ("3", road.q_heavy_vph, road.speed_heavy_kmh),
+    )
+    category_lines = []
+    for category, q, speed in flows:
+        if q <= 0.0:
+            continue
+        vehicle = _cnossos_vehicle_spectrum(category, speed, temperature_c)
+        # CNOSSOS 2.2.1: true traffic speed is used in the flow term.
+        line = vehicle + 10.0 * math.log10(float(q) / (1000.0 * float(speed)))
+        category_lines.append(line)
+
+    if not category_lines:
+        return np.full(len(OCTAVE_BANDS), -np.inf, dtype=float)
+
+    arr = np.vstack(category_lines)
+    with np.errstate(divide="ignore"):
+        return 10.0 * np.log10(np.sum(np.power(10.0, arr / 10.0), axis=0))
+
+
+def _road_total_length_m(points: List[List[float]]) -> float:
+    if len(points) < 2:
+        return 0.0
+    lat0 = sum(float(p[0]) for p in points) / len(points)
+    lon0 = sum(float(p[1]) for p in points) / len(points)
+    xy = [latlon_to_xy(float(p[0]), float(p[1]), lat0, lon0) for p in points]
+    return sum(math.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(xy, xy[1:]))
+
+
+def _road_to_equivalent_sources(road: RoadIn, temperature_c: float) -> List[SourceIn]:
+    if not road.enabled or len(road.points) < 2:
+        return []
+
+    line_spectrum = _cnossos_road_line_spectrum(road, temperature_c)
+    if not np.any(np.isfinite(line_spectrum)):
+        return []
+
+    total_length = _road_total_length_m(road.points)
+    target = max(5.0, total_length / 120.0)
+    result: List[SourceIn] = []
+    seg_index = 0
+
+    for a, b in zip(road.points, road.points[1:]):
+        lat_a, lon_a = float(a[0]), float(a[1])
+        lat_b, lon_b = float(b[0]), float(b[1])
+        lat0 = (lat_a + lat_b) / 2.0
+        lon0 = (lon_a + lon_b) / 2.0
+        ax, ay = latlon_to_xy(lat_a, lon_a, lat0, lon0)
+        bx, by = latlon_to_xy(lat_b, lon_b, lat0, lon0)
+        length = math.hypot(bx - ax, by - ay)
+        if length <= 0.05:
+            continue
+
+        n = max(1, math.ceil(length / target))
+        dl = length / n
+        segment_spectrum = line_spectrum + 10.0 * math.log10(dl)
+
+        for j in range(n):
+            f = (j + 0.5) / n
+            lat = lat_a + (lat_b - lat_a) * f
+            lon = lon_a + (lon_b - lon_a) * f
+            result.append(SourceIn(
+                id=f"{road.id}:seg:{seg_index}",
+                name=road.name,
+                lat=lat,
+                lon=lon,
+                height_m=CNOSSOS_SOURCE_HEIGHT_M,
+                lw_db=float(np.nanmax(segment_spectrum)),
+                dc_db=0.0,
+                enabled=True,
+                spectrum_mode="octaves",
+                octave_levels={
+                    str(freq): float(level)
+                    for freq, level in zip(OCTAVE_BANDS, segment_spectrum)
+                },
+                adjust_db=0.0,
+                time_active_pct=100.0,
+                parent_id=road.id,
+                parent_name=road.name,
+                source_kind="road",
+            ))
+            seg_index += 1
+    return result
+
+
+def _expand_sources(point_sources: List[SourceIn], roads: List[RoadIn], temperature_c: float):
+    expanded = list(point_sources)
+    for road in roads:
+        expanded.extend(_road_to_equivalent_sources(road, temperature_c))
+    return expanded
+
+
+def _source_group_key(source: SourceIn):
+    return (
+        source.parent_id or source.id,
+        source.parent_name or source.name,
+        source.source_kind or "point",
+    )
+
+
+def _aggregate_contributions(items: list[tuple[SourceIn, dict]]) -> list[dict]:
+    groups: dict[tuple[str, str, str], dict] = {}
+    for source, result in items:
+        key = _source_group_key(source)
+        bucket = groups.setdefault(key, {
+            "source_id": key[0],
+            "source_name": key[1],
+            "source_kind": key[2],
+            "mode": "octaves" if key[2] == "road" else result.get("mode"),
+            "levels": [],
+            "bands": {str(b): [] for b in OCTAVE_BANDS},
+        })
+        total = result.get("total_db")
+        if total is not None and np.isfinite(total):
+            bucket["levels"].append(float(total))
+        for band in OCTAVE_BANDS:
+            value = result.get("bands_db", {}).get(str(band))
+            if value is not None and np.isfinite(value):
+                bucket["bands"][str(band)].append(float(value))
+
+    output = []
+    for bucket in groups.values():
+        total = energetic_sum_db(bucket["levels"])
+        bands = {}
+        for band in OCTAVE_BANDS:
+            values = bucket["bands"][str(band)]
+            value = energetic_sum_db(values)
+            bands[str(band)] = round(float(value), 2) if values and np.isfinite(value) else None
+        output.append({
+            "source_id": bucket["source_id"],
+            "source_name": bucket["source_name"],
+            "source_kind": bucket["source_kind"],
+            "mode": bucket["mode"],
+            "level_db": round(float(total), 2) if bucket["levels"] and np.isfinite(total) else None,
+            "bands_db": bands,
+        })
+    return output
 
 
 class CalculationResponse(BaseModel):
