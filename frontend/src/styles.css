@@ -579,6 +579,85 @@ select {
   white-space: nowrap;
 }
 
+
+.building-draft-vertex,
+.building-edit-vertex {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #4f5964;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(79,89,100,.38), 0 3px 10px rgba(0,0,0,.26);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.building-draft-vertex.first {
+  width: 30px;
+  height: 30px;
+  background: #2f8a51;
+  box-shadow: 0 0 0 3px rgba(47,138,81,.28), 0 3px 12px rgba(0,0,0,.30);
+}
+
+.building-draft-vertex.first b {
+  position: absolute;
+  left: 50%;
+  top: -21px;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(24,37,50,.92);
+  color: #fff;
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.building-edit-vertex {
+  cursor: grab;
+}
+
+.building-label {
+  min-width: 72px;
+  padding: 4px 6px;
+  border: 1px solid rgba(63,74,85,.55);
+  border-radius: 6px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 3px 9px rgba(0,0,0,.16);
+  color: #34404b;
+  text-align: center;
+  cursor: pointer;
+}
+
+.building-label strong,
+.building-label span {
+  display: block;
+  white-space: nowrap;
+}
+
+.building-label strong {
+  font-size: 9px;
+}
+
+.building-label span {
+  margin-top: 1px;
+  color: #6c7782;
+  font-size: 8px;
+}
+
+.building-drawing-guide {
+  border-color: rgba(79,89,100,.28);
+}
+
+.building-drawing-guide strong {
+  color: #3f4a55;
+}
+
 .area-drawing-guide {
   position: absolute;
   z-index: 33;
