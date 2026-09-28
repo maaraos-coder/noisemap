@@ -265,6 +265,82 @@ function sourceMarkerLabel(source, aWeighting) {
   }
 }
 
+
+function profileGeometryReference(source, receiver, barrier) {
+  const R = 6371000
+  const lat0 = (source.lat + receiver.lat + barrier.lat_a + barrier.lat_b) / 4
+  const lon0 = (source.lon + receiver.lon + barrier.lon_a + barrier.lon_b) / 4
+  const lat0r = lat0 * Math.PI / 180
+
+  const toXY = (lat, lon) => ({
+    x: R * ((lon - lon0) * Math.PI / 180) * Math.cos(lat0r),
+    y: R * ((lat - lat0) * Math.PI / 180)
+  })
+  const toLatLon = (x, y) => ({
+    lat: lat0 + (y / R) * 180 / Math.PI,
+    lon: lon0 + (x / (R * Math.max(Math.cos(lat0r), 1e-9))) * 180 / Math.PI
+  })
+
+  const s = toXY(source.lat, source.lon)
+  const r = toXY(receiver.lat, receiver.lon)
+  const a = toXY(barrier.lat_a, barrier.lon_a)
+  const b = toXY(barrier.lat_b, barrier.lon_b)
+
+  const vx = r.x - s.x
+  const vy = r.y - s.y
+  const total = Math.max(Math.hypot(vx, vy), 0.001)
+  const ux = vx / total
+  const uy = vy / total
+
+  const wx = b.x - a.x
+  const wy = b.y - a.y
+  const den = vx * wy - vy * wx
+  let t = 0.5
+
+  if (Math.abs(den) > 1e-9) {
+    const qx = a.x - s.x
+    const qy = a.y - s.y
+    const candidate = (qx * wy - qy * wx) / den
+    if (Number.isFinite(candidate)) t = Math.max(0, Math.min(1, candidate))
+  } else {
+    const mx = (a.x + b.x) / 2
+    const my = (a.y + b.y) / 2
+    t = Math.max(0, Math.min(1, ((mx - s.x) * vx + (my - s.y) * vy) / (total * total)))
+  }
+
+  const anchorX = s.x + vx * t
+  const anchorY = s.y + vy * t
+
+  return {
+    lat0,
+    lon0,
+    ux,
+    uy,
+    anchorX,
+    anchorY,
+    source_to_barrier_m: total * t,
+    source_to_receiver_m: total,
+    toLatLon
+  }
+}
+
+function draftProfileCoordinates(draft) {
+  if (!draft?.geometryRef) return null
+  const g = draft.geometryRef
+  const fb = Math.max(0.1, Number(draft.source_to_barrier_m) || 0.1)
+  const fr = Math.max(fb + 0.1, Number(draft.source_to_receiver_m) || fb + 0.1)
+
+  const sx = g.anchorX - g.ux * fb
+  const sy = g.anchorY - g.uy * fb
+  const rx = g.anchorX + g.ux * (fr - fb)
+  const ry = g.anchorY + g.uy * (fr - fb)
+
+  return {
+    source: g.toLatLon(sx, sy),
+    receiver: g.toLatLon(rx, ry)
+  }
+}
+
 function IconButton({ active, title, icon, label, onClick }) {
   return (
     <button
@@ -343,6 +419,7 @@ function App() {
   const [profileReceiverId, setProfileReceiverId] = useState('')
   const [barrierProfile, setBarrierProfile] = useState(null)
   const [barrierProfileLoading, setBarrierProfileLoading] = useState(false)
+  const [profileDraft, setProfileDraft] = useState(null)
   const [layers, setLayers] = useState({
     raster: true,
     sources: true,
@@ -784,11 +861,30 @@ function App() {
   }, [selected, sources, receivers, profileSourceId, profileReceiverId])
 
   useEffect(() => {
-    if (!barrierProfileOpen || selected?.type !== 'barrier') return
-    const source = sources.find(item => item.id === profileSourceId)
-    const receiver = receivers.find(item => item.id === profileReceiverId)
-    const barrier = barriers.find(item => item.id === selected.id)
-    if (!source || !receiver || !barrier) return
+    if (!barrierProfileOpen || selected?.type !== 'barrier' || !profileDraft) return
+    const sourceBase = sources.find(item => item.id === profileSourceId)
+    const receiverBase = receivers.find(item => item.id === profileReceiverId)
+    const barrierBase = barriers.find(item => item.id === selected.id)
+    const coords = draftProfileCoordinates(profileDraft)
+    if (!sourceBase || !receiverBase || !barrierBase || !coords) return
+
+    const source = {
+      ...sourceBase,
+      lat: coords.source.lat,
+      lon: coords.source.lon,
+      height_m: Number(profileDraft.source_height_m)
+    }
+    const receiver = {
+      ...receiverBase,
+      lat: coords.receiver.lat,
+      lon: coords.receiver.lon,
+      height_m: Number(profileDraft.receiver_height_m),
+      height_mode: 'specify'
+    }
+    const barrier = {
+      ...barrierBase,
+      height_m: Number(profileDraft.barrier_height_m)
+    }
 
     let cancelled = false
     const load = async () => {
@@ -838,6 +934,7 @@ function App() {
     sources,
     receivers,
     barriers,
+    profileDraft,
     resolution,
     height,
     alpha,
@@ -848,29 +945,96 @@ function App() {
   ])
 
   const updateProfileBarrierHeight = value => {
-    if (selected?.type !== 'barrier') return
-    const heightValue = Math.max(0, Number(value) || 0)
-    setBarriers(prev => prev.map(item =>
-      item.id === selected.id ? { ...item, height_m: heightValue } : item
-    ))
+    const heightValue = Math.max(0.1, Number(value) || 0.1)
+    setProfileDraft(prev => prev ? { ...prev, barrier_height_m: heightValue } : prev)
   }
 
   const updateProfileReceiverHeight = value => {
-    if (!profileReceiverId) return
-    const heightValue = Math.max(0, Number(value) || 0)
-    setReceivers(prev => prev.map(item =>
-      item.id === profileReceiverId
-        ? { ...item, height_m: heightValue, height_mode: 'specify' }
-        : item
-    ))
+    const heightValue = Math.max(0.1, Number(value) || 0.1)
+    setProfileDraft(prev => prev ? { ...prev, receiver_height_m: heightValue } : prev)
   }
 
   const updateProfileSourceHeight = value => {
-    if (!profileSourceId) return
-    const heightValue = Math.max(0, Number(value) || 0)
+    const heightValue = Math.max(0.1, Number(value) || 0.1)
+    setProfileDraft(prev => prev ? { ...prev, source_height_m: heightValue } : prev)
+  }
+
+  const updateProfileSourceBarrierDistance = value => {
+    const distance = Math.max(0.1, Number(value) || 0.1)
+    setProfileDraft(prev => {
+      if (!prev) return prev
+      const fr = Math.max(Number(prev.source_to_receiver_m) || distance + 0.1, distance + 0.1)
+      return { ...prev, source_to_barrier_m: distance, source_to_receiver_m: fr }
+    })
+  }
+
+  const updateProfileSourceReceiverDistance = value => {
+    setProfileDraft(prev => {
+      if (!prev) return prev
+      const min = Math.max(0.2, Number(prev.source_to_barrier_m) + 0.1)
+      return { ...prev, source_to_receiver_m: Math.max(min, Number(value) || min) }
+    })
+  }
+
+  const openBarrierProfile = () => {
+    if (selected?.type !== 'barrier') return
+    const source = sources.find(item => item.id === profileSourceId) || sources[0]
+    const receiver = receivers.find(item => item.id === profileReceiverId) || receivers[0]
+    const barrier = barriers.find(item => item.id === selected.id)
+    if (!source || !receiver || !barrier) return
+
+    if (!profileSourceId) setProfileSourceId(source.id)
+    if (!profileReceiverId) setProfileReceiverId(receiver.id)
+
+    const geometryRef = profileGeometryReference(source, receiver, barrier)
+    setProfileDraft({
+      source_height_m: Number(source.height_m),
+      receiver_height_m: Number(receiver.height_m),
+      barrier_height_m: Number(barrier.height_m),
+      source_to_barrier_m: Math.max(0.1, geometryRef.source_to_barrier_m),
+      source_to_receiver_m: Math.max(geometryRef.source_to_receiver_m, geometryRef.source_to_barrier_m + 0.1),
+      geometryRef
+    })
+    setBarrierProfileOpen(true)
+  }
+
+  const saveProfileChangesToMap = () => {
+    if (!profileDraft || selected?.type !== 'barrier') return
+    const coords = draftProfileCoordinates(profileDraft)
+    if (!coords) return
+
     setSources(prev => prev.map(item =>
-      item.id === profileSourceId ? { ...item, height_m: heightValue } : item
+      item.id === profileSourceId
+        ? {
+            ...item,
+            lat: coords.source.lat,
+            lon: coords.source.lon,
+            height_m: Number(profileDraft.source_height_m)
+          }
+        : item
     ))
+
+    setReceivers(prev => prev.map(item =>
+      item.id === profileReceiverId
+        ? {
+            ...item,
+            lat: coords.receiver.lat,
+            lon: coords.receiver.lon,
+            height_m: Number(profileDraft.receiver_height_m),
+            height_mode: 'specify'
+          }
+        : item
+    ))
+
+    setBarriers(prev => prev.map(item =>
+      item.id === selected.id
+        ? { ...item, height_m: Number(profileDraft.barrier_height_m) }
+        : item
+    ))
+
+    setDirty(true)
+    setBarrierProfileOpen(false)
+    setProfileDraft(null)
   }
 
   const selectedReceiverResult = selected?.type === 'receiver'
@@ -2179,7 +2343,7 @@ function App() {
                 type="button"
                 className="profile-open-button"
                 disabled={!sources.length || !receivers.length}
-                onClick={() => setBarrierProfileOpen(true)}
+                onClick={openBarrierProfile}
               >
                 Ver perfil acústico F–B–R
               </button>
@@ -2221,7 +2385,10 @@ function App() {
               <span className="eyebrow">BARRERA</span>
               <h3>Perfil acústico F–B–R</h3>
             </div>
-            <button onClick={() => setBarrierProfileOpen(false)}>×</button>
+            <button onClick={() => {
+              setBarrierProfileOpen(false)
+              setProfileDraft(null)
+            }}>×</button>
           </div>
 
           <div className="profile-top-row">
@@ -2237,32 +2404,18 @@ function App() {
             </label>
           </div>
 
-          {selected?.type === 'barrier' && (() => {
-            const activeSource = sources.find(item => item.id === profileSourceId)
-            const activeReceiver = receivers.find(item => item.id === profileReceiverId)
-            const activeBarrier = barriers.find(item => item.id === selected.id)
-            if (!activeSource || !activeReceiver || !activeBarrier) return null
-            return (
+          {profileDraft && (
+            <>
               <div className="profile-height-controls">
                 <label>
                   Altura fuente
                   <div>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeSource.height_m}
-                      onChange={e => updateProfileSourceHeight(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeSource.height_m}
-                      onChange={e => updateProfileSourceHeight(e.target.value)}
-                    />
+                    <input type="range" min="0.1" max="20" step="0.1"
+                      value={profileDraft.source_height_m}
+                      onChange={e => updateProfileSourceHeight(e.target.value)} />
+                    <input type="number" min="0.1" max="20" step="0.1"
+                      value={profileDraft.source_height_m}
+                      onChange={e => updateProfileSourceHeight(e.target.value)} />
                     <span>m</span>
                   </div>
                 </label>
@@ -2270,22 +2423,12 @@ function App() {
                 <label>
                   Altura barrera
                   <div>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeBarrier.height_m}
-                      onChange={e => updateProfileBarrierHeight(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeBarrier.height_m}
-                      onChange={e => updateProfileBarrierHeight(e.target.value)}
-                    />
+                    <input type="range" min="0.1" max="20" step="0.1"
+                      value={profileDraft.barrier_height_m}
+                      onChange={e => updateProfileBarrierHeight(e.target.value)} />
+                    <input type="number" min="0.1" max="20" step="0.1"
+                      value={profileDraft.barrier_height_m}
+                      onChange={e => updateProfileBarrierHeight(e.target.value)} />
                     <span>m</span>
                   </div>
                 </label>
@@ -2293,28 +2436,69 @@ function App() {
                 <label>
                   Altura receptor
                   <div>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeReceiver.height_m}
-                      onChange={e => updateProfileReceiverHeight(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={activeReceiver.height_m}
-                      onChange={e => updateProfileReceiverHeight(e.target.value)}
-                    />
+                    <input type="range" min="0.1" max="20" step="0.1"
+                      value={profileDraft.receiver_height_m}
+                      onChange={e => updateProfileReceiverHeight(e.target.value)} />
+                    <input type="number" min="0.1" max="20" step="0.1"
+                      value={profileDraft.receiver_height_m}
+                      onChange={e => updateProfileReceiverHeight(e.target.value)} />
                     <span>m</span>
                   </div>
                 </label>
               </div>
-            )
-          })()}
+
+              <div className="profile-distance-controls">
+                <label>
+                  Distancia Fuente → Barrera
+                  <div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max={Math.max(200, Number(profileDraft.source_to_receiver_m))}
+                      step="0.5"
+                      value={profileDraft.source_to_barrier_m}
+                      onChange={e => updateProfileSourceBarrierDistance(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={Number(profileDraft.source_to_barrier_m).toFixed(1)}
+                      onChange={e => updateProfileSourceBarrierDistance(e.target.value)}
+                    />
+                    <span>m</span>
+                  </div>
+                </label>
+
+                <label>
+                  Distancia Fuente → Receptor
+                  <div>
+                    <input
+                      type="range"
+                      min={Math.max(0.6, Number(profileDraft.source_to_barrier_m) + 0.1)}
+                      max="400"
+                      step="0.5"
+                      value={profileDraft.source_to_receiver_m}
+                      onChange={e => updateProfileSourceReceiverDistance(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={Math.max(0.2, Number(profileDraft.source_to_barrier_m) + 0.1)}
+                      step="0.1"
+                      value={Number(profileDraft.source_to_receiver_m).toFixed(1)}
+                      onChange={e => updateProfileSourceReceiverDistance(e.target.value)}
+                    />
+                    <span>m</span>
+                  </div>
+                </label>
+
+                <div className="profile-derived-distance">
+                  <span>Barrera → Receptor</span>
+                  <strong>{Math.max(0, Number(profileDraft.source_to_receiver_m) - Number(profileDraft.source_to_barrier_m)).toFixed(1)} m</strong>
+                </div>
+              </div>
+            </>
+          )}
 
           {barrierProfileLoading && <div className="profile-loading">Actualizando perfil…</div>}
 
@@ -2376,6 +2560,29 @@ function App() {
                   </svg>
                 </div>
 
+                <div className="profile-receiver-live">
+                  <div>
+                    <span>Nivel proyectado en {receivers.find(item => item.id === profileReceiverId)?.name || 'receptor'}</span>
+                    <strong>
+                      {barrierProfile.receiver_level_db != null
+                        ? Number(barrierProfile.receiver_level_db).toFixed(1) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
+                        : '—'}
+                    </strong>
+                  </div>
+                  <div className="profile-live-bands">
+                    {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                      <span key={freq}>
+                        <small>{freq >= 1000 ? freq/1000 + 'k' : freq}</small>
+                        <b>
+                          {barrierProfile.receiver_bands_db?.[String(freq)] != null
+                            ? Number(barrierProfile.receiver_bands_db[String(freq)]).toFixed(1)
+                            : '—'}
+                        </b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="profile-metrics">
                   <div><span>Distancia F–R</span><strong>{barrierProfile.horizontal_total_m.toFixed(1)} m</strong></div>
                   <div><span>Altura LOS en barrera</span><strong>{barrierProfile.los_height_at_barrier_m.toFixed(2)} m</strong></div>
@@ -2394,18 +2601,15 @@ function App() {
                 </div>
 
                 <div className="profile-note">
-                  Puedes modificar aquí mismo las alturas de fuente, barrera y receptor. El perfil se recalcula automáticamente. Pulsa “Guardar cambios en el mapa” para volver al escenario con esta geometría aplicada.
+                  Estos cambios son una simulación previa. Modifica alturas y distancias y observa el nivel proyectado en el receptor. Solo se aplicarán al escenario cuando pulses “Actualizar cambios en el mapa”.
                 </div>
 
                 <button
                   type="button"
                   className="profile-save-map-button"
-                  onClick={() => {
-                    setDirty(true)
-                    setBarrierProfileOpen(false)
-                  }}
+                  onClick={saveProfileChangesToMap}
                 >
-                  Guardar cambios en el mapa
+                  Actualizar cambios en el mapa
                 </button>
               </>
             )
