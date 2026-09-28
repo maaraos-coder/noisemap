@@ -281,6 +281,7 @@ function IconButton({ active, title, icon, label, onClick }) {
 
 function App() {
   const mapRef = useRef(null)
+  const projectFileInputRef = useRef(null)
 
   const [mode, setMode] = useState('navigate')
   const [sources, setSources] = useState(initialSources)
@@ -335,6 +336,8 @@ function App() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const [resultsOpen, setResultsOpen] = useState(false)
+  const [projectOpen, setProjectOpen] = useState(false)
+  const [projectMessage, setProjectMessage] = useState('')
   const [layers, setLayers] = useState({
     raster: true,
     sources: true,
@@ -482,6 +485,112 @@ function App() {
 
     if (mode === 'area') {
       setDraftPolygon(prev => [...prev, [lat, lng]])
+    }
+  }
+
+  const saveProject = () => {
+    const payload = {
+      format: 'NoiseMapUCProject',
+      version: 1,
+      saved_at: new Date().toISOString(),
+      app_engine: 'V4 spectral',
+      data: {
+        sources,
+        receivers,
+        barriers,
+        accessories,
+        contours,
+        polygon,
+        rayMode,
+        globalSettings,
+        resolution,
+        height,
+        alpha,
+        frequency,
+        vmin,
+        vmax,
+        layers,
+        result
+      }
+    }
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `proyecto-mapa-ruido-${stamp}.noisemap.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    setProjectMessage('Proyecto guardado. Conserva este archivo para continuar más adelante.')
+  }
+
+  const loadProjectFile = async event => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+
+      if (payload?.format !== 'NoiseMapUCProject' || !payload?.data) {
+        throw new Error('El archivo no corresponde a un proyecto válido de la herramienta.')
+      }
+
+      const data = payload.data
+      if (!Array.isArray(data.sources) || !Array.isArray(data.receivers) || !Array.isArray(data.polygon)) {
+        throw new Error('El proyecto está incompleto o dañado.')
+      }
+
+      setSources(data.sources)
+      setReceivers(data.receivers)
+      setBarriers(Array.isArray(data.barriers) ? data.barriers : [])
+      setAccessories(Array.isArray(data.accessories) ? data.accessories : [])
+      setContours(Array.isArray(data.contours) ? data.contours : [])
+      setPolygon(data.polygon)
+      setRayMode(data.rayMode || 'off')
+      if (data.globalSettings) setGlobalSettings(data.globalSettings)
+      if (Number.isFinite(Number(data.resolution))) setResolution(Number(data.resolution))
+      if (Number.isFinite(Number(data.height))) setHeight(Number(data.height))
+      if (Number.isFinite(Number(data.alpha))) setAlpha(Number(data.alpha))
+      if (Number.isFinite(Number(data.frequency))) setFrequency(Number(data.frequency))
+      if (Number.isFinite(Number(data.vmin))) setVmin(Number(data.vmin))
+      if (Number.isFinite(Number(data.vmax))) setVmax(Number(data.vmax))
+      if (data.layers) setLayers(data.layers)
+      setResult(data.result || null)
+
+      setSelected(null)
+      setMode('navigate')
+      setDraftPolygon([])
+      setContourDraft([])
+      setBarrierStart(null)
+      setBarrierHover(null)
+      setLineStart(null)
+      setProjectMessage(
+        data.result
+          ? 'Proyecto cargado con su último cálculo. Si modificas algo, vuelve a calcular el mapa.'
+          : 'Proyecto cargado correctamente.'
+      )
+
+      if (data.polygon.length >= 3) {
+        const lats = data.polygon.map(p => Number(p[0])).filter(Number.isFinite)
+        const lons = data.polygon.map(p => Number(p[1])).filter(Number.isFinite)
+        if (lats.length && lons.length) {
+          mapRef.current?.fitBounds(
+            [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+            { padding: 90, duration: 900 }
+          )
+        }
+      }
+    } catch (error) {
+      console.error(error)
+      setProjectMessage(error.message || 'No fue posible abrir el proyecto.')
+    } finally {
+      event.target.value = ''
     }
   }
 
@@ -1182,6 +1291,21 @@ function App() {
         </button>
         <button
           type="button"
+          className={projectOpen ? 'active' : ''}
+          title="Guardar o abrir proyecto"
+          onClick={() => {
+            setProjectOpen(v => !v)
+            setSearchOpen(false)
+            setSettingsOpen(false)
+            setLayersOpen(false)
+            setResultsOpen(false)
+            setTopographyImportOpen(false)
+          }}
+        >
+          <span>▣</span><small>Proyecto</small>
+        </button>
+        <button
+          type="button"
           className={resultsOpen ? 'active' : ''}
           title="Resultados en receptores"
           onClick={() => {
@@ -1248,6 +1372,57 @@ function App() {
         </div>
       )}
 
+
+      <input
+        ref={projectFileInputRef}
+        type="file"
+        accept=".json,.noisemap.json,application/json"
+        onChange={loadProjectFile}
+        style={{ display: 'none' }}
+      />
+
+      {projectOpen && (
+        <div className="floating-dialog project-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">PROYECTO</span>
+              <h3>Guardar y continuar después</h3>
+            </div>
+            <button onClick={() => setProjectOpen(false)}>×</button>
+          </div>
+
+          <div className="project-actions">
+            <button type="button" className="project-primary" onClick={saveProject}>
+              <span>↓</span>
+              <div>
+                <strong>Guardar proyecto</strong>
+                <small>Descarga todo el trabajo actual</small>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="project-secondary"
+              onClick={() => projectFileInputRef.current?.click()}
+            >
+              <span>↑</span>
+              <div>
+                <strong>Abrir proyecto</strong>
+                <small>Continúa desde un archivo guardado</small>
+              </div>
+            </button>
+          </div>
+
+          <div className="project-help">
+            El archivo conserva fuentes, espectros, receptores, barreras, topografía,
+            área de cálculo, configuración acústica y el último resultado disponible.
+          </div>
+
+          {projectMessage && (
+            <div className="project-message">{projectMessage}</div>
+          )}
+        </div>
+      )}
 
       {topographyImportOpen && (
         <div className="floating-dialog topo-import-dialog">
