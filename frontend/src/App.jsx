@@ -89,6 +89,22 @@ function barriersGeoJSON(barriers) {
 }
 
 
+function roadsGeoJSON(roads) {
+  return {
+    type: 'FeatureCollection',
+    features: roads
+      .filter(road => road.enabled && road.points?.length >= 2)
+      .map(road => ({
+        type: 'Feature',
+        properties: { id: road.id, name: road.name },
+        geometry: {
+          type: 'LineString',
+          coordinates: road.points.map(([lat, lon]) => [lon, lat])
+        }
+      }))
+  }
+}
+
 function accessoriesGeoJSON(lines) {
   return {
     type: 'FeatureCollection',
@@ -363,6 +379,8 @@ function App() {
   const [sources, setSources] = useState(initialSources)
   const [receivers, setReceivers] = useState(initialReceivers)
   const [barriers, setBarriers] = useState([])
+  const [roads, setRoads] = useState([])
+  const [roadDraft, setRoadDraft] = useState([])
   const [accessories, setAccessories] = useState([])
   const [contours, setContours] = useState([])
   const [contourDraft, setContourDraft] = useState([])
@@ -429,6 +447,7 @@ function App() {
     sources: true,
     receivers: true,
     barriers: true,
+    roads: true,
     accessories: true,
     contours: true,
     rays: true,
@@ -436,6 +455,8 @@ function App() {
   })
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
+  const roadData = useMemo(() => roadsGeoJSON(roads), [roads])
+  const roadDraftData = useMemo(() => lineGeoJSON(roadDraft), [roadDraft])
   const barrierPreviewData = useMemo(() => {
     if (!barrierStart || !barrierHover) return { type: 'FeatureCollection', features: [] }
     return {
@@ -472,7 +493,7 @@ function App() {
 
   useEffect(() => {
     setDirty(true)
-  }, [sources, receivers, barriers, polygon, resolution, height, alpha, frequency, globalSettings])
+  }, [sources, receivers, barriers, roads, contours, polygon, resolution, height, alpha, frequency, globalSettings])
 
   useEffect(() => {
     // Wake the free Render instance in the background as soon as the app opens.
@@ -582,6 +603,11 @@ function App() {
       return
     }
 
+    if (mode === 'road') {
+      setRoadDraft(prev => [...prev, [lat, lng]])
+      return
+    }
+
     if (mode === 'contour') {
       setContourDraft(prev => [...prev, [lat, lng]])
       return
@@ -602,6 +628,7 @@ function App() {
         sources,
         receivers,
         barriers,
+        roads,
         accessories,
         contours,
         polygon,
@@ -653,6 +680,7 @@ function App() {
       setSources(data.sources)
       setReceivers(data.receivers)
       setBarriers(Array.isArray(data.barriers) ? data.barriers : [])
+      setRoads(Array.isArray(data.roads) ? data.roads : [])
       setAccessories(Array.isArray(data.accessories) ? data.accessories : [])
       setContours(Array.isArray(data.contours) ? data.contours : [])
       setPolygon(data.polygon)
@@ -725,6 +753,7 @@ function App() {
       sources,
       receivers,
       barriers,
+      roads,
       contours,
       polygon: cleanPolygon,
       settings: {
@@ -895,6 +924,26 @@ function App() {
     }
   }
 
+  const finishRoad = () => {
+    if (roadDraft.length < 2) return
+    const item = {
+      id: crypto.randomUUID(),
+      name: `Vía ${roads.length + 1}`,
+      points: roadDraft,
+      enabled: true,
+      q_light_vph: 800,
+      q_medium_vph: 40,
+      q_heavy_vph: 30,
+      speed_light_kmh: 50,
+      speed_medium_kmh: 50,
+      speed_heavy_kmh: 50
+    }
+    setRoads(prev => [...prev, item])
+    setRoadDraft([])
+    setSelected({ type: 'road', id: item.id })
+    setMode('navigate')
+  }
+
   const finishContour = () => {
     if (contourDraft.length < 2) return
     const item = {
@@ -920,6 +969,7 @@ function App() {
   const cancelDrawing = () => {
     setDraftPolygon([])
     setContourDraft([])
+    setRoadDraft([])
     setBarrierStart(null)
     setBarrierHover(null)
     setLineStart(null)
@@ -965,6 +1015,7 @@ function App() {
     if (selected.type === 'source') return sources.find(x => x.id === selected.id)
     if (selected.type === 'receiver') return receivers.find(x => x.id === selected.id)
     if (selected.type === 'barrier') return barriers.find(x => x.id === selected.id)
+    if (selected.type === 'road') return roads.find(x => x.id === selected.id)
     if (selected.type === 'contour') return contours.find(x => x.id === selected.id)
     return null
   })()
@@ -1173,6 +1224,7 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sources,
+            roads,
             receiver: selectedObject,
             barriers,
             contours,
@@ -1223,6 +1275,7 @@ function App() {
     selectedObject,
     sources,
     barriers,
+    roads,
     contours,
     alpha,
     frequency,
@@ -1254,6 +1307,8 @@ function App() {
       setReceivers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    } else if (selected.type === 'road') {
+      setRoads(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     }
@@ -1271,6 +1326,8 @@ function App() {
       setReceivers(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.filter(x => x.id !== selected.id))
+    } else if (selected.type === 'road') {
+      setRoads(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.filter(x => x.id !== selected.id))
     }
@@ -1283,7 +1340,7 @@ function App() {
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
 
       if (event.key === 'Escape') {
-        if (barrierStart || lineStart || draftPolygon.length || contourDraft.length) {
+        if (barrierStart || lineStart || draftPolygon.length || contourDraft.length || roadDraft.length) {
           cancelDrawing()
         } else if (selected) {
           setSelected(null)
@@ -1299,7 +1356,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft])
+  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft, roadDraft])
 
   const imageCoordinates = result?.bounds
     ? [
