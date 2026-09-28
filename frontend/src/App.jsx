@@ -2929,20 +2929,22 @@ function App() {
                 ? 'RECEPTOR'
                 : selected.type === 'barrier'
                   ? 'BARRERA'
-                  : selected.type === 'road'
-                    ? 'TRÁFICO VIAL · CNOSSOS-EU'
-                    : 'CURVA DE NIVEL'}
+                  : selected.type === 'building'
+                    ? 'EDIFICIO · OBSTÁCULO ACÚSTICO'
+                    : selected.type === 'road'
+                      ? 'TRÁFICO VIAL · CNOSSOS-EU'
+                      : 'CURVA DE NIVEL'}
           </div>
           <h3>{selectedObject.name}</h3>
 
-          {(selected.type === 'source' || selected.type === 'receiver') && (
+          {(selected.type === 'source' || selected.type === 'receiver' || selected.type === 'building') && (
             <>
               <label>Nombre</label>
               <input
                 type="text"
                 value={selectedObject.name}
                 onChange={e => patchSelected({ name: e.target.value })}
-                placeholder={selected.type === 'source' ? 'Nombre de la fuente' : 'Nombre del receptor'}
+                placeholder={selected.type === 'source' ? 'Nombre de la fuente' : selected.type === 'building' ? 'Nombre del edificio' : 'Nombre del receptor'}
               />
             </>
           )}
@@ -3084,6 +3086,12 @@ function App() {
                 disabled={selectedObject.height_mode === 'map'}
                 onChange={e => patchSelected({ height_m:Number(e.target.value) })} />
 
+              {selectedObject.height_mode === 'facade' && (
+                <div className="engine-note">
+                  Receptor asociado a fachada de edificio · altura independiente respecto del terreno.
+                </div>
+              )}
+
               <h4 className="subheading">Resultado de presión sonora</h4>
               <div className="receiver-result">
                 <span>
@@ -3164,6 +3172,69 @@ function App() {
               )}
               <div className="engine-note">
                 Este nivel puntual incorpora distancia 3D, atmósfera, efecto de suelo, barreras y las cotas interpoladas de las curvas de nivel. El mapa de colores completo se actualiza solo al pulsar “Calcular mapa”.
+              </div>
+            </>
+          )}
+
+          {selected.type === 'building' && (
+            <>
+              <div className="status-toggle">
+                <button className={!selectedObject.enabled ? 'active off' : ''} onClick={() => patchSelected({ enabled:false })}>Off</button>
+                <button className={selectedObject.enabled ? 'active on' : ''} onClick={() => patchSelected({ enabled:true })}>On</button>
+              </div>
+
+              <div className="calculated-field">
+                <span>Vértices</span>
+                <strong>{selectedObject.points?.length || 0}</strong>
+              </div>
+
+              <label>Altura del edificio [m]</label>
+              <input
+                type="number"
+                min="0.5"
+                max="500"
+                step="0.5"
+                value={selectedObject.height_m}
+                onChange={e => patchSelected({ height_m:Math.max(0.5, Number(e.target.value) || 0.5) })}
+              />
+
+              <h4 className="subheading">Comportamiento acústico</h4>
+              <div className="engine-note">
+                El contorno del edificio actúa como obstáculo: cada fachada se incorpora al cálculo como un borde vertical de la altura indicada. El interior del edificio no se pinta en la grilla de ruido.
+              </div>
+
+              <label>Reflexión de fachada</label>
+              <div className="segmented">
+                {[0,20,50,100].map(value => (
+                  <button key={value}
+                    className={(selectedObject.reflection_percent || 0) === value ? 'active' : ''}
+                    onClick={() => patchSelected({ reflection_percent:value })}>
+                    {value === 0 ? 'Ninguna' : value + '%'}
+                  </button>
+                ))}
+              </div>
+
+              <h4 className="subheading">Receptores en fachada</h4>
+              <label>Fachada</label>
+              <select
+                value={Math.min(buildingFacadeIndex, Math.max(0, (selectedObject.points?.length || 1) - 1))}
+                onChange={e => setBuildingFacadeIndex(Number(e.target.value))}
+              >
+                {(selectedObject.points || []).map((_, index) => (
+                  <option key={index} value={index}>Fachada {index + 1}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="profile-open-button"
+                onClick={() => addFacadeReceivers(selectedObject)}
+              >
+                Crear receptores cada 3 m
+              </button>
+
+              <div className="engine-note">
+                Se crean receptores aproximadamente a 1 m de la fachada seleccionada, desde 1,5 m de altura y luego cada 3 m hasta la altura del edificio.
               </div>
             </>
           )}
