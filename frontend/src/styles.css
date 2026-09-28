@@ -1807,3 +1807,55 @@ select {
     min-width: 70px;
   }
 }
+
+
+/* Spectral receiver results */
+.receiver-spectrum {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.receiver-spectrum > div {
+  padding: 6px 4px;
+  border: 1px solid #dbe4ec;
+  border-radius: 6px;
+  background: #f7f9fb;
+  text-align: center;
+}
+
+.receiver-spectrum span {
+  display: block;
+  color: #74818d;
+  font-size: 8px;
+}
+
+.receiver-spectrum strong {
+  display: block;
+  margin-top: 2px;
+  color: #0b3768;
+  font-size: 10px;
+}
+
+.spectral-contribution-table th,
+.spectral-contribution-table td {
+  min-width: 64px;
+}
+
+.spectral-contribution-table th:first-child,
+.spectral-contribution-table td:first-child,
+.spectral-contribution-table th:nth-child(2),
+.spectral-contribution-table td:nth-child(2) {
+  min-width: 105px;
+}
+
+.results-dialog {
+  width: min(980px, calc(100vw - 110px));
+}
+
+@media (max-width: 900px) {
+  .receiver-spectrum {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
