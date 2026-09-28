@@ -1087,8 +1087,10 @@ function App() {
       if (results[0]) {
         goToLocation(results[0].lat, results[0].lon, 17)
         setLocationMessage('Selecciona un resultado para comenzar a trabajar en ese lugar.')
+      } else if (data.service_error) {
+        setLocationMessage('El servicio de búsqueda no está respondiendo en este momento. Puedes intentar nuevamente o pegar coordenadas GPS.')
       } else {
-        setLocationMessage('No se encontraron resultados. Prueba una dirección más completa o coordenadas GPS.')
+        setLocationMessage('No se encontraron resultados. Prueba agregando ciudad y país, por ejemplo: “San Francisco 335, Santiago, Chile”.')
       }
     } catch (error) {
       console.error(error)
