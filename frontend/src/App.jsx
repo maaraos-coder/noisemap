@@ -378,6 +378,7 @@ function App() {
   const projectFileInputRef = useRef(null)
 
   const [mode, setMode] = useState('navigate')
+  const [mapZoom, setMapZoom] = useState(1.35)
   const [sources, setSources] = useState(initialSources)
   const [receivers, setReceivers] = useState(initialReceivers)
   const [barriers, setBarriers] = useState([])
@@ -1689,6 +1690,7 @@ function App() {
         mapStyle={OSM_STYLE}
         onClick={onMapClick}
         onMouseMove={onMapMouseMove}
+        onZoomEnd={event => setMapZoom(event.viewState.zoom)}
         cursor={mode === 'navigate' ? 'grab' : mode === 'edit-area' ? 'default' : 'crosshair'}
         doubleClickZoom={mode !== 'area'}
       >
@@ -1995,9 +1997,20 @@ function App() {
                 setSelected({ type: 'building', id: building.id })
               }}
             >
-              <div className="building-label" title={building.name}>
-                <strong>{building.name}</strong>
-                <span>{Number(building.height_m).toFixed(1)} m</span>
+              <div
+                className={`building-label ${mapZoom < 17 ? 'compact' : ''} ${mapZoom < 15.5 ? 'dot-only' : ''}`}
+                title={`${building.name} · ${Number(building.height_m).toFixed(1)} m`}
+              >
+                {mapZoom < 15.5 ? (
+                  <span className="building-label-dot">E</span>
+                ) : mapZoom < 17 ? (
+                  <strong>{building.name}</strong>
+                ) : (
+                  <>
+                    <strong>{building.name}</strong>
+                    <span>{Number(building.height_m).toFixed(1)} m</span>
+                  </>
+                )}
               </div>
             </Marker>
           )
