@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+// Deployment sync: keep Vercel production aligned with the latest v3-react-maplibre changes.
 
 const COLORS = [
   '#2c7bb6', '#00a6ca', '#00ccbc', '#90eb9d',
