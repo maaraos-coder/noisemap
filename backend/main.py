@@ -574,6 +574,13 @@ class BarrierProfileRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
+class ReceiverPreviewRequest(BaseModel):
+    sources: List[SourceIn] = []
+    receiver: ReceiverIn
+    barriers: List[BarrierIn] = []
+    settings: GridSettings = GridSettings()
+
+
 class CalculationResponse(BaseModel):
     bounds: List[List[float]]
     levels: List[List[Optional[float]]]
@@ -687,6 +694,94 @@ def geocode(q: str):
         ]
     }
 
+
+
+
+@app.post("/api/receiver-preview")
+def receiver_preview(payload: ReceiverPreviewRequest):
+    if not payload.sources:
+        return {
+            "level_db": None,
+            "bands_db": {str(b): None for b in OCTAVE_BANDS},
+            "contributions": [],
+        }
+
+    lats = [payload.receiver.lat] + [s.lat for s in payload.sources]
+    lons = [payload.receiver.lon] + [s.lon for s in payload.sources]
+    lat0 = sum(lats) / len(lats)
+    lon0 = sum(lons) / len(lons)
+
+    barriers = [
+        Barrier(
+            name=b.name,
+            lat_a=b.lat_a,
+            lon_a=b.lon_a,
+            lat_b=b.lat_b,
+            lon_b=b.lon_b,
+            height_m=b.height_m,
+            enabled=b.enabled,
+        )
+        for b in payload.barriers
+    ]
+
+    settings = PropagationSettings(
+        alpha_db_per_km=payload.settings.alpha_db_per_km,
+        frequency_hz=payload.settings.frequency_hz,
+        max_barrier_db=payload.settings.max_barrier_db,
+        temperature_c=payload.settings.temperature_c,
+        humidity_pct=payload.settings.humidity_pct,
+    )
+    settings.a_weighting = payload.settings.a_weighting
+
+    contributions = []
+    totals = []
+    band_values = {str(b): [] for b in OCTAVE_BANDS}
+
+    for source in payload.sources:
+        if not source.enabled:
+            continue
+
+        result = _source_spectral_result(
+            source,
+            payload.receiver.lat,
+            payload.receiver.lon,
+            payload.receiver.height_m,
+            barriers,
+            settings,
+            lat0,
+            lon0,
+        )
+
+        total = result.get("total_db")
+        if total is not None and np.isfinite(total):
+            totals.append(float(total))
+
+        for band in OCTAVE_BANDS:
+            value = result.get("bands_db", {}).get(str(band))
+            if value is not None and np.isfinite(value):
+                band_values[str(band)].append(float(value))
+
+        contributions.append({
+            "source_id": source.id,
+            "source_name": source.name,
+            "level_db": round(float(total), 3)
+                if total is not None and np.isfinite(total)
+                else None,
+            "bands_db": result.get("bands_db", {}),
+        })
+
+    total_level = energetic_sum_db(totals)
+    bands_db = {}
+    for band in OCTAVE_BANDS:
+        values = band_values[str(band)]
+        value = energetic_sum_db(values)
+        bands_db[str(band)] = round(float(value), 3) if values and np.isfinite(value) else None
+
+    return {
+        "level_db": round(float(total_level), 3) if np.isfinite(total_level) else None,
+        "bands_db": bands_db,
+        "contributions": contributions,
+    }
 
 
 @app.post("/api/barrier-profile")
