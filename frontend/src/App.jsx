@@ -229,6 +229,7 @@ function App() {
   const [polygon, setPolygon] = useState(defaultPolygon)
   const [draftPolygon, setDraftPolygon] = useState([])
   const [barrierStart, setBarrierStart] = useState(null)
+  const [barrierHover, setBarrierHover] = useState(null)
   const [lineStart, setLineStart] = useState(null)
   const [rayMode, setRayMode] = useState('off')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -275,6 +276,20 @@ function App() {
   })
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
+  const barrierPreviewData = useMemo(() => {
+    if (!barrierStart || !barrierHover) return { type: 'FeatureCollection', features: [] }
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: [[barrierStart[1], barrierStart[0]], [barrierHover[1], barrierHover[0]]]
+        }
+      }]
+    }
+  }, [barrierStart, barrierHover])
   const accessoryData = useMemo(() => accessoriesGeoJSON(accessories), [accessories])
   const rayData = useMemo(() => raysGeoJSON(sources, receivers, rayMode), [sources, receivers, rayMode])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
@@ -296,6 +311,13 @@ function App() {
   useEffect(() => {
     setDirty(true)
   }, [sources, barriers, polygon, resolution, height, alpha, frequency, vmin, vmax, globalSettings])
+
+  const onMapMouseMove = event => {
+    if (mode === 'barrier' && barrierStart) {
+      const { lat, lng } = event.lngLat
+      setBarrierHover([lat, lng])
+    }
+  }
 
   const onMapClick = event => {
     const { lat, lng } = event.lngLat
@@ -339,6 +361,7 @@ function App() {
     if (mode === 'barrier') {
       if (!barrierStart) {
         setBarrierStart([lat, lng])
+        setBarrierHover([lat, lng])
       } else {
         const item = {
           id: crypto.randomUUID(),
@@ -353,6 +376,7 @@ function App() {
         }
         setBarriers(prev => [...prev, item])
         setBarrierStart(null)
+        setBarrierHover(null)
         setSelected({ type: 'barrier', id: item.id })
       }
       return
@@ -441,6 +465,7 @@ function App() {
   const cancelDrawing = () => {
     setDraftPolygon([])
     setBarrierStart(null)
+    setBarrierHover(null)
     setLineStart(null)
     setMode('navigate')
   }
@@ -548,6 +573,7 @@ function App() {
         }}
         mapStyle={OSM_STYLE}
         onClick={onMapClick}
+        onMouseMove={onMapMouseMove}
         cursor={mode === 'navigate' ? 'grab' : mode === 'edit-area' ? 'default' : 'crosshair'}
         doubleClickZoom={mode !== 'area'}
       >
@@ -597,6 +623,21 @@ function App() {
               id="draft-area-line"
               type="line"
               paint={{ 'line-color': '#0b63ce', 'line-width': 3 }}
+            />
+          </Source>
+        )}
+
+        {mode === 'barrier' && barrierStart && barrierHover && (
+          <Source id="barrier-preview" type="geojson" data={barrierPreviewData}>
+            <Layer
+              id="barrier-preview-line"
+              type="line"
+              paint={{
+                'line-color': '#6f42c1',
+                'line-width': 3,
+                'line-dasharray': [2, 1.5],
+                'line-opacity': 0.85
+              }}
             />
           </Source>
         )}
@@ -1281,6 +1322,10 @@ function App() {
                 <button className={!selectedObject.enabled ? 'active off' : ''} onClick={() => patchSelected({ enabled:false })}>Off</button>
                 <button className={selectedObject.enabled ? 'active on' : ''} onClick={() => patchSelected({ enabled:true })}>On</button>
               </div>
+              <div className="calculated-field">
+                <span>Longitud</span>
+                <strong>{haversineMeters(selectedObject.lat_a, selectedObject.lon_a, selectedObject.lat_b, selectedObject.lon_b).toFixed(1)} m</strong>
+              </div>
               <label>Altura superior [m]</label>
               <input type="number" step="0.1" value={selectedObject.height_m}
                 onChange={e => patchSelected({ height_m:Number(e.target.value) })} />
@@ -1304,7 +1349,11 @@ function App() {
       )}
 
       {mode === 'barrier' && barrierStart && (
-        <div className="status-pill">Selecciona el segundo extremo de la barrera</div>
+        <div className="status-pill barrier-length-pill">
+          Barrera · {barrierHover
+            ? haversineMeters(barrierStart[0], barrierStart[1], barrierHover[0], barrierHover[1]).toFixed(1)
+            : '0.0'} m · selecciona el segundo extremo
+        </div>
       )}
 
       {mode === 'line' && lineStart && (
