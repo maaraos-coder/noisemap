@@ -410,6 +410,7 @@ function App() {
   const [calculationStatus, setCalculationStatus] = useState('')
   const [receiverPreview, setReceiverPreview] = useState(null)
   const [receiverPreviewLoading, setReceiverPreviewLoading] = useState(false)
+  const [receiverPreviewError, setReceiverPreviewError] = useState('')
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -1154,10 +1155,13 @@ function App() {
     if (selected?.type !== 'receiver' || !selectedObject) {
       setReceiverPreview(null)
       setReceiverPreviewLoading(false)
+      setReceiverPreviewError('')
       return
     }
 
     let cancelled = false
+    setReceiverPreview(null)
+    setReceiverPreviewError('')
     const timer = setTimeout(async () => {
       setReceiverPreviewLoading(true)
       try {
@@ -1190,7 +1194,10 @@ function App() {
         if (!cancelled) setReceiverPreview(data)
       } catch (error) {
         console.error('Vista previa de receptor:', error)
-        if (!cancelled) setReceiverPreview(null)
+        if (!cancelled) {
+          setReceiverPreview(null)
+          setReceiverPreviewError(error.message || 'No fue posible actualizar el nivel puntual.')
+        }
       } finally {
         if (!cancelled) setReceiverPreviewLoading(false)
       }
@@ -2452,22 +2459,51 @@ function App() {
 
               <h4 className="subheading">Resultado de presión sonora</h4>
               <div className="receiver-result">
-                <span>{receiverPreviewLoading ? 'Actualizando…' : 'Nivel puntual en vivo'}</span>
+                <span>
+                  {receiverPreviewLoading
+                    ? 'Actualizando…'
+                    : receiverPreviewError
+                      ? 'Vista previa no disponible'
+                      : 'Nivel puntual en vivo'}
+                </span>
                 <strong>
                   {receiverPreview?.level_db != null
                     ? Number(receiverPreview.level_db).toFixed(2) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
-                    : selectedReceiverResult?.level_db != null
-                      ? Number(selectedReceiverResult.level_db).toFixed(2) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
-                      : 'Sin calcular'}
+                    : receiverPreviewLoading
+                      ? '…'
+                      : receiverPreviewError
+                        ? '—'
+                        : 'Sin calcular'}
                 </strong>
               </div>
 
-              {(receiverPreview?.bands_db || selectedReceiverResult?.bands_db) && (
+              {receiverPreview?.diagnostics?.length > 0 && (
+                <div className="receiver-live-diagnostics">
+                  <div>
+                    <span>Distancia 3D F–R</span>
+                    <strong>{Number(receiverPreview.diagnostics[0].distance_3d_m).toFixed(1)} m</strong>
+                  </div>
+                  <div>
+                    <span>Adiv</span>
+                    <strong>{Number(receiverPreview.diagnostics[0].a_div_db).toFixed(1)} dB</strong>
+                  </div>
+                  <div>
+                    <span>Abar</span>
+                    <strong>{Number(receiverPreview.diagnostics[0].a_bar_db).toFixed(1)} dB</strong>
+                  </div>
+                </div>
+              )}
+
+              {receiverPreviewError && (
+                <div className="receiver-preview-error">
+                  No se está mostrando el resultado anterior: {receiverPreviewError}
+                </div>
+              )}
+
+              {receiverPreview?.bands_db && (
                 <div className="receiver-spectrum">
                   {[63,125,250,500,1000,2000,4000,8000].map(freq => {
-                    const liveValue = receiverPreview?.bands_db?.[String(freq)]
-                    const savedValue = selectedReceiverResult?.bands_db?.[String(freq)]
-                    const value = liveValue != null ? liveValue : savedValue
+                    const value = receiverPreview.bands_db?.[String(freq)]
                     return (
                       <div key={freq}>
                         <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
