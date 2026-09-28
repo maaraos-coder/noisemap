@@ -2494,6 +2494,18 @@ function App() {
           <h3>{selectedObject.name}</h3>
 
           {(selected.type === 'source' || selected.type === 'receiver') && (
+            <>
+              <label>Nombre</label>
+              <input
+                type="text"
+                value={selectedObject.name}
+                onChange={e => patchSelected({ name: e.target.value })}
+                placeholder={selected.type === 'source' ? 'Nombre de la fuente' : 'Nombre del receptor'}
+              />
+            </>
+          )}
+
+          {(selected.type === 'source' || selected.type === 'receiver') && (
             <div className="coordinate-row">
               <span>{selectedObject.lat.toFixed(6)}</span>
               <span>{selectedObject.lon.toFixed(6)}</span>
