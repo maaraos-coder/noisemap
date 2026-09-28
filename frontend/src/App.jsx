@@ -311,6 +311,7 @@ function App() {
   const [selected, setSelected] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [resultsOpen, setResultsOpen] = useState(false)
   const [layers, setLayers] = useState({
     raster: true,
     sources: true,
@@ -928,6 +929,14 @@ function App() {
             }}
           >
             <div className="technical-marker receiver-marker" title={receiver.name}>
+              {(() => {
+                const receiverResult = result?.receiver_results?.find(item => item.id === receiver.id)
+                return receiverResult?.level_db != null ? (
+                  <div className="receiver-level-label">
+                    {receiverResult.level_db.toFixed(1)} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}
+                  </div>
+                ) : null
+              })()}
               <span className="receiver-ring" />
               <span className="receiver-core">R</span>
             </div>
@@ -1144,6 +1153,20 @@ function App() {
         </button>
         <button
           type="button"
+          className={resultsOpen ? 'active' : ''}
+          title="Resultados en receptores"
+          onClick={() => {
+            setResultsOpen(v => !v)
+            setSearchOpen(false)
+            setSettingsOpen(false)
+            setLayersOpen(false)
+            setTopographyImportOpen(false)
+          }}
+        >
+          <span>▦</span><small>Resultados</small>
+        </button>
+        <button
+          type="button"
           className={panelOpen ? 'active' : ''}
           title="Modelo acústico"
           onClick={() => setPanelOpen(v => !v)}
@@ -1277,6 +1300,79 @@ function App() {
                 <small key={index}>{warning}</small>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {resultsOpen && (
+        <div className="floating-dialog results-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">RESULTADOS</span>
+              <h3>Receptores del mapa</h3>
+            </div>
+            <button onClick={() => setResultsOpen(false)}>×</button>
+          </div>
+
+          {!result?.receiver_results?.length ? (
+            <div className="results-empty">
+              Calcula el mapa para obtener niveles y contribuciones en los receptores.
+            </div>
+          ) : (
+            <>
+              <div className="results-table-wrap">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>Receptor</th>
+                      <th>Altura</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.receiver_results.map(row => (
+                      <tr key={row.id}>
+                        <td>{row.name}</td>
+                        <td>{Number(row.height_m).toFixed(1)} m</td>
+                        <td><strong>{row.level_db != null ? row.level_db.toFixed(1) : '—'} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <h4 className="results-subtitle">Contribución por fuente</h4>
+              <div className="results-table-wrap contribution-wrap">
+                <table className="results-table contribution-table">
+                  <thead>
+                    <tr>
+                      <th>Receptor</th>
+                      {sources.filter(s => s.enabled).map(source => (
+                        <th key={source.id}>{source.name}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.receiver_results.map(row => (
+                      <tr key={row.id}>
+                        <td>{row.name}</td>
+                        {sources.filter(s => s.enabled).map(source => {
+                          const contribution = row.contributions?.find(item => item.source_id === source.id)
+                          return (
+                            <td key={source.id}>
+                              {contribution?.level_db != null ? contribution.level_db.toFixed(1) : '—'}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="results-note">
+                Las contribuciones corresponden al nivel de cada fuente considerada individualmente en el mismo receptor y con las mismas barreras y parámetros del modelo.
+              </div>
+            </>
           )}
         </div>
       )}
