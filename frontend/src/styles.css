@@ -1388,3 +1388,9 @@ select {
     min-width: 108px;
   }
 }
+
+
+.barrier-length-pill {
+  font-weight: 750;
+  letter-spacing: .01em;
+}
