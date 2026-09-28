@@ -18,6 +18,7 @@ class Source:
     lw_db: float = 100.0
     dc_db: float = 0.0
     enabled: bool = True
+    ground_elevation_m: float = 0.0
 
 
 @dataclass
@@ -37,6 +38,7 @@ class Barrier:
     lon_b: float
     height_m: float = 3.0
     enabled: bool = True
+    ground_elevation_m: float = 0.0
 
 
 @dataclass
@@ -46,6 +48,7 @@ class PropagationSettings:
     max_barrier_db: float = 20.0
     temperature_c: float = 15.0
     humidity_pct: float = 70.0
+    ground_factor: float = 0.0
 
 
 def latlon_to_xy(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
@@ -73,6 +76,29 @@ def geometric_divergence_db(distance_m: float) -> float:
 
 def atmospheric_absorption_db(distance_m: float, alpha_db_per_km: float) -> float:
     return max(0.0, float(alpha_db_per_km)) * max(0.0, float(distance_m)) / 1000.0
+
+
+def ground_attenuation_db(
+    distance_m: float,
+    source_height_m: float,
+    receiver_height_m: float,
+    ground_factor: float,
+) -> float:
+    """Educational ISO 9613-2 alternative ground-effect approximation.
+
+    G=0 represents acoustically hard ground and produces no ground attenuation.
+    G=1 applies the porous-ground alternative expression. Intermediate G values
+    interpolate linearly. This intentionally remains a simplified teaching
+    model rather than the full octave-band source/middle/receiver-region method.
+    """
+    g = min(1.0, max(0.0, float(ground_factor)))
+    if g <= 0.0:
+        return 0.0
+
+    d = max(float(distance_m), 1.0)
+    hm = max(0.0, (float(source_height_m) + float(receiver_height_m)) / 2.0)
+    porous = 4.8 - (2.0 * hm / d) * (17.0 + 300.0 / d)
+    return g * max(0.0, min(4.8, porous))
 
 
 
@@ -186,16 +212,17 @@ def barrier_attenuation_db(
     ix = sx + t * (rx - sx)
     iy = sy + t * (ry - sy)
     los_z = sz + t * (rz - sz)
+    barrier_top_z = barrier.ground_elevation_m + barrier.height_m
 
-    if barrier.height_m <= los_z:
+    if barrier_top_z <= los_z:
         return 0.0
 
     d1_h = math.hypot(ix - sx, iy - sy)
     d2_h = math.hypot(rx - ix, ry - iy)
     direct = math.sqrt((rx - sx) ** 2 + (ry - sy) ** 2 + (rz - sz) ** 2)
     via_top = (
-        math.sqrt(d1_h**2 + (barrier.height_m - sz) ** 2)
-        + math.sqrt(d2_h**2 + (barrier.height_m - rz) ** 2)
+        math.sqrt(d1_h**2 + (barrier_top_z - sz) ** 2)
+        + math.sqrt(d2_h**2 + (barrier_top_z - rz) ** 2)
     )
     delta = max(0.0, via_top - direct)
     if delta <= 0:
@@ -216,14 +243,18 @@ def source_to_point_breakdown(
     settings: PropagationSettings,
     lat0: float,
     lon0: float,
+    receiver_ground_elevation_m: float = 0.0,
 ) -> dict[str, float]:
     sx, sy = latlon_to_xy(source.lat, source.lon, lat0, lon0)
     rx, ry = latlon_to_xy(receiver_lat, receiver_lon, lat0, lon0)
 
+    source_z = source.ground_elevation_m + source.height_m
+    receiver_z = receiver_ground_elevation_m + receiver_height_m
+
     distance_m = math.sqrt(
         (rx - sx) ** 2
         + (ry - sy) ** 2
-        + (receiver_height_m - source.height_m) ** 2
+        + (receiver_z - source_z) ** 2
     )
     distance_m = max(1.0, distance_m)
 
@@ -232,8 +263,8 @@ def source_to_point_breakdown(
 
     barrier_losses = [
         barrier_attenuation_db(
-            sx, sy, source.height_m,
-            rx, ry, receiver_height_m,
+            sx, sy, source_z,
+            rx, ry, receiver_z,
             b, lat0, lon0,
             frequency_hz=settings.frequency_hz,
             max_barrier_db=settings.max_barrier_db,
@@ -242,8 +273,14 @@ def source_to_point_breakdown(
         if b.enabled
     ]
     a_bar = max(barrier_losses, default=0.0)
+    a_gr = ground_attenuation_db(
+        distance_m,
+        source.height_m,
+        receiver_height_m,
+        settings.ground_factor,
+    )
 
-    lp = source.lw_db + source.dc_db - a_div - a_atm - a_bar
+    lp = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar
 
     return {
         "distance_m": distance_m,
@@ -251,7 +288,10 @@ def source_to_point_breakdown(
         "dc_db": source.dc_db,
         "a_div_db": a_div,
         "a_atm_db": a_atm,
+        "a_gr_db": a_gr,
         "a_bar_db": a_bar,
+        "source_ground_elevation_m": source.ground_elevation_m,
+        "receiver_ground_elevation_m": receiver_ground_elevation_m,
         "lp_db": lp,
     }
 
@@ -265,6 +305,7 @@ def level_at_point(
     settings: PropagationSettings,
     lat0: float,
     lon0: float,
+    receiver_ground_elevation_m: float = 0.0,
 ) -> float:
     contributions = []
     for source in sources:
@@ -279,6 +320,7 @@ def level_at_point(
             settings,
             lat0,
             lon0,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
         contributions.append(result["lp_db"])
     return energetic_sum_db(contributions)
