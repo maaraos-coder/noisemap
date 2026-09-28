@@ -787,6 +787,10 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     lons = [payload.receiver.lon] + [s.lon for s in payload.sources]
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
+    terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
+    receiver_ground_elevation_m = _terrain_elevation(
+        terrain_samples, payload.receiver.lat, payload.receiver.lon, lat0, lon0
+    )
 
     barriers = [
         Barrier(
@@ -797,6 +801,13 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lon_b=b.lon_b,
             height_m=b.height_m,
             enabled=b.enabled,
+            ground_elevation_m=_terrain_elevation(
+                terrain_samples,
+                (b.lat_a + b.lat_b) / 2.0,
+                (b.lon_a + b.lon_b) / 2.0,
+                lat0,
+                lon0,
+            ),
         )
         for b in payload.barriers
     ]
@@ -830,6 +841,8 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             settings,
             lat0,
             lon0,
+            terrain_samples=terrain_samples,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
 
         # Explicit 3D geometry diagnostic using the same propagation engine.
@@ -841,6 +854,9 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lw_db=float(source.lw_db),
             dc_db=source.dc_db,
             enabled=source.enabled,
+            ground_elevation_m=_terrain_elevation(
+                terrain_samples, source.lat, source.lon, lat0, lon0
+            ),
         )
         diag = source_to_point_breakdown(
             diagnostic_source,
@@ -851,6 +867,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             settings,
             lat0,
             lon0,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
         diagnostics.append({
             "source_id": source.id,
@@ -858,7 +875,10 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             "distance_3d_m": round(float(diag["distance_m"]), 3),
             "a_div_db": round(float(diag["a_div_db"]), 3),
             "a_atm_db": round(float(diag["a_atm_db"]), 3),
+            "a_gr_db": round(float(diag["a_gr_db"]), 3),
             "a_bar_db": round(float(diag["a_bar_db"]), 3),
+            "source_ground_elevation_m": round(float(diag["source_ground_elevation_m"]), 3),
+            "receiver_ground_elevation_m": round(float(diag["receiver_ground_elevation_m"]), 3),
         })
 
         total = result.get("total_db")
@@ -892,6 +912,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         "contributions": contributions,
         "diagnostics": diagnostics,
         "receiver_height_m": payload.receiver.height_m,
+        "receiver_ground_elevation_m": round(float(receiver_ground_elevation_m), 3),
     }
 
 
@@ -904,6 +925,20 @@ def barrier_profile(payload: BarrierProfileRequest):
     lat0 = (s.lat + r.lat + b.lat_a + b.lat_b) / 4.0
     lon0 = (s.lon + r.lon + b.lon_a + b.lon_b) / 4.0
 
+    terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
+    source_ground = _terrain_elevation(terrain_samples, s.lat, s.lon, lat0, lon0)
+    receiver_ground = _terrain_elevation(terrain_samples, r.lat, r.lon, lat0, lon0)
+    barrier_ground = _terrain_elevation(
+        terrain_samples,
+        (b.lat_a + b.lat_b) / 2.0,
+        (b.lon_a + b.lon_b) / 2.0,
+        lat0,
+        lon0,
+    )
+    source_z = source_ground + s.height_m
+    receiver_z = receiver_ground + r.height_m
+    barrier_top_z = barrier_ground + b.height_m
+
     sx, sy = latlon_to_xy(s.lat, s.lon, lat0, lon0)
     rx, ry = latlon_to_xy(r.lat, r.lon, lat0, lon0)
     ax, ay = latlon_to_xy(b.lat_a, b.lon_a, lat0, lon0)
@@ -914,7 +949,7 @@ def barrier_profile(payload: BarrierProfileRequest):
 
     if hit:
         barrier_x = max(0.0, min(horizontal_total, horizontal_total * t))
-        los_z = s.height_m + t * (r.height_m - s.height_m)
+        los_z = source_z + t * (receiver_z - source_z)
     else:
         # For visualization only, project barrier midpoint onto the source-receiver axis.
         mx = (ax + bx) / 2.0
@@ -924,16 +959,16 @@ def barrier_profile(payload: BarrierProfileRequest):
         proj_t = ((mx - sx) * vx + (my - sy) * vy) / denom
         proj_t = max(0.0, min(1.0, proj_t))
         barrier_x = horizontal_total * proj_t
-        los_z = s.height_m + proj_t * (r.height_m - s.height_m)
+        los_z = source_z + proj_t * (receiver_z - source_z)
 
     d1_h = barrier_x
     d2_h = max(0.0, horizontal_total - barrier_x)
-    direct = math.sqrt(horizontal_total ** 2 + (r.height_m - s.height_m) ** 2)
+    direct = math.sqrt(horizontal_total ** 2 + (receiver_z - source_z) ** 2)
     via_top = (
-        math.sqrt(d1_h ** 2 + (b.height_m - s.height_m) ** 2)
-        + math.sqrt(d2_h ** 2 + (b.height_m - r.height_m) ** 2)
+        math.sqrt(d1_h ** 2 + (barrier_top_z - source_z) ** 2)
+        + math.sqrt(d2_h ** 2 + (barrier_top_z - receiver_z) ** 2)
     )
-    delta = max(0.0, via_top - direct) if hit and b.height_m > los_z else 0.0
+    delta = max(0.0, via_top - direct) if hit and barrier_top_z > los_z else 0.0
 
     barrier_model = Barrier(
         name=b.name,
@@ -943,14 +978,15 @@ def barrier_profile(payload: BarrierProfileRequest):
         lon_b=b.lon_b,
         height_m=b.height_m,
         enabled=b.enabled,
+        ground_elevation_m=barrier_ground,
     )
 
     attenuation_by_band = {}
     for band in OCTAVE_BANDS:
         attenuation_by_band[str(band)] = round(
             barrier_attenuation_db(
-                sx, sy, s.height_m,
-                rx, ry, r.height_m,
+                sx, sy, source_z,
+                rx, ry, receiver_z,
                 barrier_model,
                 lat0, lon0,
                 frequency_hz=float(band),
@@ -964,8 +1000,8 @@ def barrier_profile(payload: BarrierProfileRequest):
         else payload.settings.frequency_hz
     )
     selected_attenuation = barrier_attenuation_db(
-        sx, sy, s.height_m,
-        rx, ry, r.height_m,
+        sx, sy, source_z,
+        rx, ry, receiver_z,
         barrier_model,
         lat0, lon0,
         frequency_hz=float(selected_frequency),
@@ -978,6 +1014,7 @@ def barrier_profile(payload: BarrierProfileRequest):
         max_barrier_db=payload.settings.max_barrier_db,
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
+        ground_factor=payload.settings.ground_factor,
     )
     profile_settings.a_weighting = payload.settings.a_weighting
 
@@ -990,14 +1027,22 @@ def barrier_profile(payload: BarrierProfileRequest):
         profile_settings,
         lat0,
         lon0,
+        terrain_samples=terrain_samples,
+        receiver_ground_elevation_m=receiver_ground,
     )
 
     return {
         "intersects": bool(hit),
-        "blocked": bool(hit and b.height_m > los_z),
+        "blocked": bool(hit and barrier_top_z > los_z),
         "source_height_m": s.height_m,
         "receiver_height_m": r.height_m,
         "barrier_height_m": b.height_m,
+        "source_ground_elevation_m": round(source_ground, 3),
+        "receiver_ground_elevation_m": round(receiver_ground, 3),
+        "barrier_ground_elevation_m": round(barrier_ground, 3),
+        "source_absolute_z_m": round(source_z, 3),
+        "receiver_absolute_z_m": round(receiver_z, 3),
+        "barrier_top_absolute_z_m": round(barrier_top_z, 3),
         "horizontal_total_m": round(horizontal_total, 3),
         "source_to_barrier_m": round(d1_h, 3),
         "barrier_to_receiver_m": round(d2_h, 3),
@@ -1065,6 +1110,15 @@ def calculate(payload: CalculationRequest):
 
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
+    terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
+    for barrier_model, barrier_input in zip(barriers, payload.barriers):
+        barrier_model.ground_elevation_m = _terrain_elevation(
+            terrain_samples,
+            (barrier_input.lat_a + barrier_input.lat_b) / 2.0,
+            (barrier_input.lon_a + barrier_input.lon_b) / 2.0,
+            lat0,
+            lon0,
+        )
 
     matrix: list[list[Optional[float]]] = []
     finite: list[float] = []
@@ -1080,6 +1134,9 @@ def calculate(payload: CalculationRequest):
                 row.append(None)
                 continue
 
+            receiver_ground = _terrain_elevation(
+                terrain_samples, lat_f, lon_f, lat0, lon0
+            )
             level = _combined_spectral_level_at_point(
                 payload.sources,
                 lat_f,
@@ -1089,6 +1146,8 @@ def calculate(payload: CalculationRequest):
                 settings,
                 lat0,
                 lon0,
+                terrain_samples=terrain_samples,
+                receiver_ground_elevation_m=receiver_ground,
             )
 
             if np.isfinite(level):
@@ -1110,6 +1169,9 @@ def calculate(payload: CalculationRequest):
             if not source_input.enabled:
                 continue
 
+            receiver_ground = _terrain_elevation(
+                terrain_samples, receiver.lat, receiver.lon, lat0, lon0
+            )
             source_result = _source_spectral_result(
                 source_input,
                 receiver.lat,
@@ -1119,6 +1181,8 @@ def calculate(payload: CalculationRequest):
                 settings,
                 lat0,
                 lon0,
+                terrain_samples=terrain_samples,
+                receiver_ground_elevation_m=receiver_ground,
             )
 
             source_total = source_result.get("total_db")
@@ -1153,6 +1217,7 @@ def calculate(payload: CalculationRequest):
             "id": receiver.id,
             "name": receiver.name,
             "height_m": receiver.height_m,
+            "ground_elevation_m": round(float(receiver_ground), 2) if payload.contours else 0.0,
             "level_db": round(float(total_level), 2) if np.isfinite(total_level) else None,
             "bands_db": receiver_bands,
             "contributions": contributions,
