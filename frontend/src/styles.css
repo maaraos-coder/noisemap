@@ -2382,3 +2382,36 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Keep object cards fully accessible above bottom toolbar */
+.advanced-object-card {
+  bottom: 112px !important;
+  max-height: calc(100vh - 145px) !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.advanced-object-card::-webkit-scrollbar {
+  width: 7px;
+}
+
+.advanced-object-card::-webkit-scrollbar-thumb {
+  background: rgba(84, 101, 118, .35);
+  border-radius: 999px;
+}
+
+.advanced-object-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .advanced-object-card {
+    bottom: 102px !important;
+    top: 18px !important;
+    max-height: none !important;
+    height: auto;
+    overflow-y: auto !important;
+  }
+}
