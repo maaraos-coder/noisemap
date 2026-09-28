@@ -546,7 +546,7 @@ class ReceiverIn(BaseModel):
 
 class GridSettings(BaseModel):
     resolution: int = Field(default=48, ge=18, le=100)
-    receiver_height_m: float = Field(default=1.5, gt=0.0, le=50.0)
+    receiver_height_m: float = Field(default=1.5, gt=0.0, le=500.0)
     alpha_db_per_km: float = Field(default=2.0, ge=0.0, le=50.0)
     frequency_hz: float = Field(default=500.0, ge=20.0, le=20000.0)
     vmin: float = 35.0
