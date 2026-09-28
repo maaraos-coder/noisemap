@@ -242,6 +242,29 @@ function sourceEquivalentLevel(source, aWeighting) {
   return Number(source.lw_db)
 }
 
+
+function sourceMarkerLabel(source, aWeighting) {
+  if (source.spectrum_mode === 'single') {
+    return {
+      main: `${Number(source.lw_db).toFixed(1)} dB`,
+      sub: `${Number(source.single_frequency_hz).toFixed(0)} Hz`
+    }
+  }
+
+  if (source.spectrum_mode === 'octaves') {
+    const total = sourceEquivalentLevel(source, aWeighting)
+    return {
+      main: `${total.toFixed(1)} ${aWeighting ? 'dB(A)' : 'dB'}`,
+      sub: 'Octavas'
+    }
+  }
+
+  return {
+    main: `${Number(source.lw_db).toFixed(1)} dB(A)`,
+    sub: 'Broadband'
+  }
+}
+
 function IconButton({ active, title, icon, label, onClick }) {
   return (
     <button
@@ -904,6 +927,15 @@ function App() {
             }}
           >
             <div className="technical-marker source-marker" title={source.name}>
+              {(() => {
+                const label = sourceMarkerLabel(source, globalSettings.a_weighting)
+                return (
+                  <div className="source-level-label">
+                    <strong>{label.main}</strong>
+                    <span>{label.sub}</span>
+                  </div>
+                )
+              })()}
               <span className="source-wave wave-a" />
               <span className="source-wave wave-b" />
               <span className="source-core">F</span>
@@ -1725,7 +1757,10 @@ function App() {
                   </div>
                   <div className="calculated-field">
                     <span>Total energético {globalSettings.a_weighting ? 'A' : 'Z'}</span>
-                    <strong>{sourceEquivalentLevel(selectedObject, globalSettings.a_weighting).toFixed(1)} dB</strong>
+                    <strong>{sourceEquivalentLevel(selectedObject, globalSettings.a_weighting).toFixed(1)} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</strong>
+                  </div>
+                  <div className="engine-note">
+                    En el mapa se muestra este total energético sobre la F. El detalle por banda permanece en esta ficha.
                   </div>
                 </>
               )}
