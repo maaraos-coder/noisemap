@@ -951,29 +951,31 @@ async def import_topography(
 def geocode(q: str):
     query = q.strip()
     if not query:
-        return {"results": []}
+        return {"results": [], "provider": None}
 
-    params = urlencode({
-        "q": query,
-        "format": "jsonv2",
-        "limit": 5,
-        "addressdetails": 1,
-    })
-    request = Request(
-        f"https://nominatim.openstreetmap.org/search?{params}",
-        headers={
-            "User-Agent": "NoiseMapLab-UC/3.1 (educational acoustic mapping)",
-            "Accept-Language": "es",
-        },
-    )
+    headers = {
+        "User-Agent": "NoiseMapLab-UC/3.2 (educational acoustic mapping; contact via project repository)",
+        "Accept-Language": "es",
+    }
+
+    # 1) Primary provider: OpenStreetMap Nominatim.
+    nominatim_error = None
     try:
-        with urlopen(request, timeout=8) as response:
+        params = urlencode({
+            "q": query,
+            "format": "jsonv2",
+            "limit": 8,
+            "addressdetails": 1,
+            "dedupe": 1,
+        })
+        request = Request(
+            f"https://nominatim.openstreetmap.org/search?{params}",
+            headers=headers,
+        )
+        with urlopen(request, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return {"results": []}
 
-    return {
-        "results": [
+        results = [
             {
                 "display_name": item.get("display_name", ""),
                 "lat": float(item["lat"]),
@@ -983,6 +985,60 @@ def geocode(q: str):
             for item in payload
             if "lat" in item and "lon" in item
         ]
+        if results:
+            return {"results": results[:5], "provider": "nominatim"}
+    except Exception as exc:
+        nominatim_error = str(exc)
+
+    # 2) Fallback provider: Photon (OSM based). This helps when Nominatim
+    # temporarily rejects/limits the request or does not resolve a street number.
+    photon_error = None
+    try:
+        params = urlencode({"q": query, "limit": 8, "lang": "es"})
+        request = Request(
+            f"https://photon.komoot.io/api/?{params}",
+            headers=headers,
+        )
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        results = []
+        for feature in payload.get("features", []):
+            geometry = feature.get("geometry") or {}
+            coordinates = geometry.get("coordinates") or []
+            if len(coordinates) < 2:
+                continue
+
+            props = feature.get("properties") or {}
+            parts = []
+            house = props.get("housenumber")
+            street = props.get("street") or props.get("name")
+            if street:
+                parts.append(f"{street} {house}".strip() if house else str(street))
+            for key in ("district", "city", "county", "state", "country"):
+                value = props.get(key)
+                if value and str(value) not in parts:
+                    parts.append(str(value))
+
+            results.append({
+                "display_name": ", ".join(parts) or query,
+                "lat": float(coordinates[1]),
+                "lon": float(coordinates[0]),
+                "type": props.get("type", ""),
+            })
+
+        if results:
+            return {"results": results[:5], "provider": "photon"}
+    except Exception as exc:
+        photon_error = str(exc)
+
+    # Distinguish a genuine "no match" from a provider/network failure.
+    provider_error = bool(nominatim_error and photon_error)
+    return {
+        "results": [],
+        "provider": None,
+        "service_error": provider_error,
+        "detail": "No fue posible consultar los servicios de búsqueda." if provider_error else "",
     }
 
 
