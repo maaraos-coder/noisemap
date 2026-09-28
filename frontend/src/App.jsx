@@ -1190,7 +1190,14 @@ function App() {
           })
         })
         const data = await response.json()
-        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`)
+        if (!response.ok) {
+          const detail = Array.isArray(data?.detail)
+            ? data.detail.map(item => item?.msg || JSON.stringify(item)).join(' · ')
+            : typeof data?.detail === 'object' && data?.detail !== null
+              ? JSON.stringify(data.detail)
+              : data?.detail
+          throw new Error(detail || `HTTP ${response.status}`)
+        }
         if (!cancelled) setReceiverPreview(data)
       } catch (error) {
         console.error('Vista previa de receptor:', error)
