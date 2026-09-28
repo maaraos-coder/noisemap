@@ -725,6 +725,7 @@ function App() {
       sources,
       receivers,
       barriers,
+      contours,
       polygon: cleanPolygon,
       settings: {
         resolution,
@@ -1011,6 +1012,7 @@ function App() {
             source,
             receiver,
             barrier,
+            contours,
             settings: {
               resolution,
               receiver_height_m: height,
@@ -1048,6 +1050,7 @@ function App() {
     sources,
     receivers,
     barriers,
+    contours,
     profileDraft,
     resolution,
     height,
@@ -1172,6 +1175,7 @@ function App() {
             sources,
             receiver: selectedObject,
             barriers,
+            contours,
             settings: {
               resolution,
               receiver_height_m: selectedObject.height_m,
@@ -1219,6 +1223,7 @@ function App() {
     selectedObject,
     sources,
     barriers,
+    contours,
     alpha,
     frequency,
     vmin,
@@ -2127,7 +2132,7 @@ function App() {
               <input type="number" min="0" max="1" step="0.1" value={globalSettings.ground_factor}
                 onChange={e => setGlobalSettings(s => ({ ...s, ground_factor: Number(e.target.value) }))} />
             </label>
-            <div className="future-note">Preparado para el motor espectral; todavía no modifica el cálculo V3.</div>
+            <div className="future-note">Activo en el motor: G=0 representa suelo duro y G=1 suelo poroso mediante una aproximación educativa del efecto de suelo.</div>
           </div>
 
           <div className="settings-section two-cols">
@@ -2495,9 +2500,23 @@ function App() {
                     <strong>{Number(receiverPreview.diagnostics[0].a_div_db).toFixed(1)} dB</strong>
                   </div>
                   <div>
+                    <span>Aatm</span>
+                    <strong>{Number(receiverPreview.diagnostics[0].a_atm_db).toFixed(1)} dB</strong>
+                  </div>
+                  <div>
+                    <span>Agr · suelo</span>
+                    <strong>{Number(receiverPreview.diagnostics[0].a_gr_db).toFixed(1)} dB</strong>
+                  </div>
+                  <div>
                     <span>Abar</span>
                     <strong>{Number(receiverPreview.diagnostics[0].a_bar_db).toFixed(1)} dB</strong>
                   </div>
+                  {contours.length > 0 && (
+                    <div>
+                      <span>Cota terreno receptor</span>
+                      <strong>{Number(receiverPreview.diagnostics[0].receiver_ground_elevation_m).toFixed(1)} m</strong>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2521,7 +2540,7 @@ function App() {
                 </div>
               )}
               <div className="engine-note">
-                Este nivel puntual se recalcula automáticamente al cambiar la altura del receptor. El mapa de colores completo se actualiza solo al pulsar “Calcular mapa”.
+                Este nivel puntual incorpora distancia 3D, atmósfera, efecto de suelo, barreras y las cotas interpoladas de las curvas de nivel. El mapa de colores completo se actualiza solo al pulsar “Calcular mapa”.
               </div>
             </>
           )}
