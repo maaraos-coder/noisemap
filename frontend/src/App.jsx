@@ -677,44 +677,90 @@ function App() {
   }
 
   const calculate = async () => {
-    if (polygon.length < 3 || !sources.some(s => s.enabled)) return
+    if (!sources.some(s => s.enabled)) return
 
+    const cleanPolygon = polygon
+      .map(point => [Number(point?.[0]), Number(point?.[1])])
+      .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
+      .filter((point, index, arr) => (
+        index === 0 ||
+        point[0] !== arr[index - 1][0] ||
+        point[1] !== arr[index - 1][1]
+      ))
+
+    const uniquePoints = new Set(cleanPolygon.map(([lat, lon]) => `${lat.toFixed(9)},${lon.toFixed(9)}`))
+    if (cleanPolygon.length < 3 || uniquePoints.size < 3) {
+      alert('El área de cálculo necesita al menos 3 vértices distintos.')
+      return
+    }
+
+    setMode('navigate')
+    setDraftPolygon([])
     setCalculating(true)
-    try {
+
+    const payload = {
+      sources,
+      receivers,
+      barriers,
+      polygon: cleanPolygon,
+      settings: {
+        resolution,
+        receiver_height_m: height,
+        alpha_db_per_km: alpha,
+        frequency_hz: frequency,
+        vmin,
+        vmax,
+        prediction_model: globalSettings.prediction_model,
+        a_weighting: globalSettings.a_weighting,
+        ground_factor: globalSettings.ground_factor,
+        temperature_c: globalSettings.temperature_c,
+        humidity_pct: globalSettings.humidity_pct,
+        max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
+        reflections_enabled: globalSettings.reflection_order !== 'none'
+      }
+    }
+
+    const runRequest = async () => {
       const response = await fetch(`${API_BASE}/api/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sources,
-          receivers,
-          barriers,
-          polygon,
-          settings: {
-            resolution,
-            receiver_height_m: height,
-            alpha_db_per_km: alpha,
-            frequency_hz: frequency,
-            vmin,
-            vmax,
-            prediction_model: globalSettings.prediction_model,
-            a_weighting: globalSettings.a_weighting,
-            ground_factor: globalSettings.ground_factor,
-            temperature_c: globalSettings.temperature_c,
-            humidity_pct: globalSettings.humidity_pct,
-            max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
-            reflections_enabled: globalSettings.reflection_order !== 'none'
-          }
-        })
+        body: JSON.stringify(payload)
       })
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      if (!response.ok) {
+        let detail = ''
+        try {
+          const errorPayload = await response.json()
+          detail = errorPayload?.detail ? `: ${errorPayload.detail}` : ''
+        } catch {
+          // response body is not JSON
+        }
+        const error = new Error(`HTTP ${response.status}${detail}`)
+        error.status = response.status
+        throw error
+      }
 
-      const data = await response.json()
+      return response.json()
+    }
+
+    try {
+      let data
+      try {
+        data = await runRequest()
+      } catch (firstError) {
+        const retryable = !firstError.status || [502, 503, 504].includes(firstError.status)
+        if (!retryable) throw firstError
+
+        await new Promise(resolve => setTimeout(resolve, 2500))
+        data = await runRequest()
+      }
+
+      setPolygon(cleanPolygon)
       setResult(data)
       setDirty(false)
     } catch (error) {
-      console.error(error)
-      alert('No fue posible calcular el mapa. Revisa que el backend FastAPI esté disponible.')
+      console.error('Error al calcular mapa:', error)
+      alert(`No fue posible calcular el mapa. ${error.message || 'Error desconocido.'}`)
     } finally {
       setCalculating(false)
     }
