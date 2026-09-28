@@ -494,10 +494,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sources: sources.map(source => ({
-            ...source,
-            lw_db: sourceEquivalentLevel(source, globalSettings.a_weighting)
-          })),
+          sources,
           receivers,
           barriers,
           polygon,
@@ -1358,7 +1355,10 @@ function App() {
                     <tr>
                       <th>Receptor</th>
                       <th>Altura</th>
-                      <th>Total</th>
+                      {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                        <th key={freq}>{freq >= 1000 ? freq/1000 + 'k' : freq}</th>
+                      ))}
+                      <th>Total {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1366,7 +1366,14 @@ function App() {
                       <tr key={row.id}>
                         <td>{row.name}</td>
                         <td>{Number(row.height_m).toFixed(1)} m</td>
-                        <td><strong>{row.level_db != null ? row.level_db.toFixed(1) : '—'} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</strong></td>
+                        {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                          <td key={freq}>
+                            {row.bands_db?.[String(freq)] != null
+                              ? Number(row.bands_db[String(freq)]).toFixed(1)
+                              : '—'}
+                          </td>
+                        ))}
+                        <td><strong>{row.level_db != null ? row.level_db.toFixed(1) : '—'}</strong></td>
                       </tr>
                     ))}
                   </tbody>
@@ -1375,34 +1382,41 @@ function App() {
 
               <h4 className="results-subtitle">Contribución por fuente</h4>
               <div className="results-table-wrap contribution-wrap">
-                <table className="results-table contribution-table">
+                <table className="results-table contribution-table spectral-contribution-table">
                   <thead>
                     <tr>
                       <th>Receptor</th>
-                      {sources.filter(s => s.enabled).map(source => (
-                        <th key={source.id}>{source.name}</th>
+                      <th>Fuente</th>
+                      <th>Modo</th>
+                      {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                        <th key={freq}>{freq >= 1000 ? freq/1000 + 'k' : freq}</th>
                       ))}
+                      <th>Total {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.receiver_results.map(row => (
-                      <tr key={row.id}>
-                        <td>{row.name}</td>
-                        {sources.filter(s => s.enabled).map(source => {
-                          const contribution = row.contributions?.find(item => item.source_id === source.id)
-                          return (
-                            <td key={source.id}>
-                              {contribution?.level_db != null ? contribution.level_db.toFixed(1) : '—'}
+                    {result.receiver_results.flatMap(row =>
+                      (row.contributions || []).map(contribution => (
+                        <tr key={`${row.id}-${contribution.source_id}`}>
+                          <td>{row.name}</td>
+                          <td>{contribution.source_name}</td>
+                          <td>{contribution.mode === 'octaves' ? 'Octavas' : contribution.mode === 'single' ? 'Single' : 'Broadband'}</td>
+                          {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                            <td key={freq}>
+                              {contribution.bands_db?.[String(freq)] != null
+                                ? Number(contribution.bands_db[String(freq)]).toFixed(1)
+                                : '—'}
                             </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
+                          ))}
+                          <td><strong>{contribution.level_db != null ? Number(contribution.level_db).toFixed(1) : '—'}</strong></td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
               <div className="results-note">
-                Las contribuciones corresponden al nivel de cada fuente considerada individualmente en el mismo receptor y con las mismas barreras y parámetros del modelo.
+                Las bandas 63–8000 Hz son niveles de presión sonora por banda en el receptor. El total aplica ponderación A cuando está activada. Broadband no inventa un espectro: si la fuente fue ingresada solo como LwA, sus celdas por banda aparecen como “—”.
               </div>
             </>
           )}
@@ -1789,7 +1803,7 @@ function App() {
               )}
 
               <div className="engine-note">
-                Octavas y Single se reducen a un nivel equivalente para el motor V3. La propagación espectral por banda se incorporará en el motor V4.
+                El motor V4 propaga las fuentes en octavas banda por banda. Single se calcula a su frecuencia y Broadband permanece como nivel global LwA sin inventar un espectro.
               </div>
             </>
           )}
@@ -1816,10 +1830,25 @@ function App() {
                 <span>Nivel total</span>
                 <strong>
                   {selectedReceiverResult?.level_db != null
-                    ? selectedReceiverResult.level_db.toFixed(1) + ' dB'
+                    ? selectedReceiverResult.level_db.toFixed(1) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
                     : 'Sin calcular'}
                 </strong>
               </div>
+
+              {selectedReceiverResult?.bands_db && (
+                <div className="receiver-spectrum">
+                  {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                    <div key={freq}>
+                      <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
+                      <strong>
+                        {selectedReceiverResult.bands_db[String(freq)] != null
+                          ? Number(selectedReceiverResult.bands_db[String(freq)]).toFixed(1)
+                          : '—'}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="engine-note">El resultado puntual se actualiza cada vez que calculas el mapa.</div>
             </>
           )}
