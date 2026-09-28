@@ -1297,6 +1297,10 @@ def calculate(payload: CalculationRequest):
             receiver_results=[],
         )
 
+    all_sources = _expand_sources(
+        payload.sources, payload.roads, payload.settings.temperature_c
+    )
+
     lats = [p[0] for p in polygon]
     lons = [p[1] for p in polygon]
     south, north = min(lats), max(lats)
@@ -1336,7 +1340,7 @@ def calculate(payload: CalculationRequest):
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
     source_ground_elevations = {
         source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
-        for source in payload.sources
+        for source in all_sources
     }
     for barrier_model, barrier_input in zip(barriers, payload.barriers):
         barrier_model.ground_elevation_m = _terrain_elevation(
@@ -1365,7 +1369,7 @@ def calculate(payload: CalculationRequest):
                 terrain_samples, lat_f, lon_f, lat0, lon0
             )
             level = _combined_spectral_level_at_point(
-                payload.sources,
+                all_sources,
                 lat_f,
                 lon_f,
                 payload.settings.receiver_height_m,
@@ -1389,17 +1393,17 @@ def calculate(payload: CalculationRequest):
 
     receiver_results = []
     for receiver in payload.receivers:
-        contributions = []
         all_source_totals = []
         combined_band_levels = {str(b): [] for b in OCTAVE_BANDS}
+        contribution_items = []
+        receiver_ground = _terrain_elevation(
+            terrain_samples, receiver.lat, receiver.lon, lat0, lon0
+        )
 
-        for source_input in payload.sources:
+        for source_input in all_sources:
             if not source_input.enabled:
                 continue
 
-            receiver_ground = _terrain_elevation(
-                terrain_samples, receiver.lat, receiver.lon, lat0, lon0
-            )
             source_result = _source_spectral_result(
                 source_input,
                 receiver.lat,
@@ -1413,6 +1417,7 @@ def calculate(payload: CalculationRequest):
                 receiver_ground_elevation_m=receiver_ground,
                 source_ground_elevation_m=source_ground_elevations.get(source_input.id),
             )
+            contribution_items.append((source_input, source_result))
 
             source_total = source_result.get("total_db")
             if source_total is not None and np.isfinite(source_total):
@@ -1422,16 +1427,6 @@ def calculate(payload: CalculationRequest):
                 band_value = source_result["bands_db"].get(str(band))
                 if band_value is not None and np.isfinite(band_value):
                     combined_band_levels[str(band)].append(float(band_value))
-
-            contributions.append({
-                "source_id": source_input.id,
-                "source_name": source_input.name,
-                "mode": source_result.get("mode"),
-                "level_db": round(float(source_total), 2)
-                    if source_total is not None and np.isfinite(source_total)
-                    else None,
-                "bands_db": source_result.get("bands_db", {}),
-            })
 
         total_level = energetic_sum_db(all_source_totals)
         receiver_bands = {}
@@ -1449,7 +1444,7 @@ def calculate(payload: CalculationRequest):
             "ground_elevation_m": round(float(receiver_ground), 2) if payload.contours else 0.0,
             "level_db": round(float(total_level), 2) if np.isfinite(total_level) else None,
             "bands_db": receiver_bands,
-            "contributions": contributions,
+            "contributions": _aggregate_contributions(contribution_items),
         })
 
     return CalculationResponse(
