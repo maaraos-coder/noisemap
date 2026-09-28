@@ -2433,3 +2433,132 @@ select {
 .profile-save-map-button:hover {
   background: #0957b6;
 }
+
+
+/* Geometry simulation controls in barrier profile */
+.profile-distance-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 150px;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.profile-distance-controls > label,
+.profile-derived-distance {
+  padding: 8px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #536170;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.profile-distance-controls > label > div {
+  display: grid;
+  grid-template-columns: 1fr 66px 14px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.profile-distance-controls input[type="range"] {
+  width: 100%;
+}
+
+.profile-distance-controls input[type="number"] {
+  width: 66px;
+  padding: 5px 4px;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+  background: #fff;
+  text-align: center;
+  font-size: 10px;
+}
+
+.profile-derived-distance {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.profile-derived-distance span {
+  color: #75818d;
+  font-size: 8px;
+}
+
+.profile-derived-distance strong {
+  margin-top: 4px;
+  color: #0b3768;
+  font-size: 13px;
+}
+
+.profile-receiver-live {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #bfd7ee;
+  border-radius: 9px;
+  background: #eef6fd;
+}
+
+.profile-receiver-live > div:first-child {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.profile-receiver-live > div:first-child span {
+  color: #657786;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.profile-receiver-live > div:first-child strong {
+  margin-top: 3px;
+  color: #0b3768;
+  font-size: 20px;
+}
+
+.profile-live-bands {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.profile-live-bands span {
+  padding: 5px 3px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.78);
+  text-align: center;
+}
+
+.profile-live-bands small {
+  display: block;
+  color: #75818d;
+  font-size: 7px;
+}
+
+.profile-live-bands b {
+  display: block;
+  margin-top: 2px;
+  color: #0b3768;
+  font-size: 9px;
+}
+
+@media (max-width: 900px) {
+  .profile-distance-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-receiver-live {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-live-bands {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
