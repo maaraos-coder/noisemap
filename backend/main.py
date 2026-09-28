@@ -80,6 +80,7 @@ def _settings_for_band(base, band_hz: float) -> PropagationSettings:
         temperature_c=base.temperature_c,
         humidity_pct=base.humidity_pct,
         ground_factor=base.ground_factor,
+        reflections_enabled=base.reflections_enabled,
     )
 
 
@@ -211,6 +212,7 @@ def _source_spectral_result(
         temperature_c=base_settings.temperature_c,
         humidity_pct=base_settings.humidity_pct,
         ground_factor=base_settings.ground_factor,
+        reflections_enabled=base_settings.reflections_enabled,
     )
     lp = level_at_point(
         [source_model],
@@ -801,6 +803,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lon_b=b.lon_b,
             height_m=b.height_m,
             enabled=b.enabled,
+            reflection_percent=b.reflection_percent,
             ground_elevation_m=_terrain_elevation(
                 terrain_samples,
                 (b.lat_a + b.lat_b) / 2.0,
@@ -819,6 +822,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
+        reflections_enabled=payload.settings.reflections_enabled,
     )
     settings.a_weighting = payload.settings.a_weighting
 
@@ -877,6 +881,12 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             "a_atm_db": round(float(diag["a_atm_db"]), 3),
             "a_gr_db": round(float(diag["a_gr_db"]), 3),
             "a_bar_db": round(float(diag["a_bar_db"]), 3),
+            "lp_direct_db": round(float(diag["lp_direct_db"]), 3),
+            "lp_reflected_db": (
+                round(float(diag["lp_reflected_db"]), 3)
+                if np.isfinite(diag["lp_reflected_db"]) else None
+            ),
+            "reflection_count": int(diag["reflection_count"]),
             "source_ground_elevation_m": round(float(diag["source_ground_elevation_m"]), 3),
             "receiver_ground_elevation_m": round(float(diag["receiver_ground_elevation_m"]), 3),
         })
@@ -1015,6 +1025,7 @@ def barrier_profile(payload: BarrierProfileRequest):
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
+        reflections_enabled=payload.settings.reflections_enabled,
     )
     profile_settings.a_weighting = payload.settings.a_weighting
 
@@ -1094,6 +1105,7 @@ def calculate(payload: CalculationRequest):
             lon_b=b.lon_b,
             height_m=b.height_m,
             enabled=b.enabled,
+            reflection_percent=b.reflection_percent,
         )
         for b in payload.barriers
     ]
@@ -1105,6 +1117,7 @@ def calculate(payload: CalculationRequest):
         temperature_c=payload.settings.temperature_c,
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
+        reflections_enabled=payload.settings.reflections_enabled,
     )
     settings.a_weighting = payload.settings.a_weighting
 
