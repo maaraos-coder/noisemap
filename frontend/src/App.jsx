@@ -230,6 +230,16 @@ function haversineMeters(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa))
 }
 
+function polylineLengthMeters(points) {
+  if (!points || points.length < 2) return 0
+  return points.slice(1).reduce((sum, point, index) => (
+    sum + haversineMeters(
+      points[index][0], points[index][1],
+      point[0], point[1]
+    )
+  ), 0)
+}
+
 
 const A_CORRECTIONS = {63:-26.2,125:-16.1,250:-8.6,500:-3.2,1000:0,2000:1.2,4000:1.0,8000:-1.1}
 
@@ -1478,6 +1488,31 @@ function App() {
           </Source>
         )}
 
+        {layers.roads && (
+          <Source id="roads" type="geojson" data={roadData}>
+            <Layer
+              id="roads-casing"
+              type="line"
+              paint={{ 'line-color': '#1f2937', 'line-width': 8, 'line-opacity': 0.9 }}
+            />
+            <Layer
+              id="roads-line"
+              type="line"
+              paint={{ 'line-color': '#f8fafc', 'line-width': 4, 'line-opacity': 0.95 }}
+            />
+          </Source>
+        )}
+
+        {mode === 'road' && roadDraft.length >= 2 && (
+          <Source id="road-draft" type="geojson" data={roadDraftData}>
+            <Layer
+              id="road-draft-line"
+              type="line"
+              paint={{ 'line-color': '#111827', 'line-width': 5, 'line-dasharray': [2, 1] }}
+            />
+          </Source>
+        )}
+
 
         {layers.contours && (
           <Source id="contours" type="geojson" data={contourData}>
@@ -1645,6 +1680,49 @@ function App() {
           </Marker>
         ]))}
 
+        {layers.roads && roads.flatMap(road => {
+          const markers = road.points.map(([lat, lon], index) => (
+            <Marker
+              key={`${road.id}-road-vertex-${index}`}
+              longitude={lon}
+              latitude={lat}
+              draggable
+              onDragEnd={e => {
+                const { lat: newLat, lng: newLon } = e.lngLat
+                setRoads(prev => prev.map(item =>
+                  item.id === road.id
+                    ? { ...item, points: item.points.map((p, i) => i === index ? [newLat, newLon] : p) }
+                    : item
+                ))
+              }}
+              onClick={e => {
+                e.originalEvent.stopPropagation()
+                setSelected({ type: 'road', id: road.id })
+              }}
+            >
+              <div className="road-handle" title={`${road.name} · vértice ${index + 1}`} />
+            </Marker>
+          ))
+          const mid = road.points[Math.floor(road.points.length / 2)]
+          if (mid) {
+            markers.push(
+              <Marker
+                key={`${road.id}-road-label`}
+                longitude={mid[1]}
+                latitude={mid[0]}
+                anchor="bottom"
+                onClick={e => {
+                  e.originalEvent.stopPropagation()
+                  setSelected({ type: 'road', id: road.id })
+                }}
+              >
+                <div className="road-label">🛣 {road.name}</div>
+              </Marker>
+            )
+          }
+          return markers
+        })}
+
         {layers.contours && contours.map(contour => {
           const mid = contour.points[Math.floor(contour.points.length / 2)]
           if (!mid) return null
@@ -1700,6 +1778,10 @@ function App() {
           <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente (F)" onClick={() => setMode('source')} />
           <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor (R)" onClick={() => setMode('receiver')} />
           <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
+          <IconButton active={mode === 'road'} title="Dibujar eje de una vía con tráfico conocido" icon="🛣" label="Tráfico vial" onClick={() => {
+            setRoadDraft([])
+            setMode('road')
+          }} />
           <IconButton active={mode === 'line'} title="Auxiliar gráfico: solo dibujo, no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => setMode('line')} />
           <IconButton active={mode === 'contour'} title="Dibujar curva de nivel y asignar cota" icon="≋" label="Curva nivel" onClick={() => {
             setContourDraft([])
@@ -1722,6 +1804,18 @@ function App() {
             setMode('area')
           }} />
           <IconButton active={mode === 'edit-area'} title="Editar área de cálculo" icon="◇" label="Editar" onClick={() => setMode('edit-area')} />
+          {mode === 'road' && roadDraft.length >= 2 && (
+            <button
+              type="button"
+              className="bottom-context-action finish"
+              onClick={finishRoad}
+              title="Finalizar eje vial"
+            >
+              <span className="context-icon">✓</span>
+              <span>Finalizar vía</span>
+            </button>
+          )}
+
           {mode === 'contour' && contourDraft.length >= 2 && (
             <button
               type="button"
@@ -1746,7 +1840,7 @@ function App() {
             </button>
           )}
 
-          {(mode === 'contour' || mode === 'area' || barrierStart || lineStart) && (
+          {(mode === 'road' || mode === 'contour' || mode === 'area' || barrierStart || lineStart) && (
             <button
               type="button"
               className="bottom-context-action cancel"
@@ -1883,6 +1977,7 @@ function App() {
             ['sources', 'Fuentes'],
             ['receivers', 'Receptores'],
             ['barriers', 'Barreras'],
+            ['roads', 'Tráfico vial'],
             ['accessories', 'Líneas auxiliares'],
             ['contours', 'Curvas de nivel'],
             ['rays', 'Rayos fuente–receptor'],
@@ -1940,8 +2035,8 @@ function App() {
           </button>
 
           <div className="project-help compact">
-            Conserva fuentes, receptores, barreras, topografía, espectros,
-            configuración y último cálculo.
+            Conserva fuentes, tráfico vial, receptores, barreras, topografía,
+            espectros, configuración y último cálculo.
           </div>
 
           {projectMessage && (
@@ -2384,7 +2479,9 @@ function App() {
                 ? 'RECEPTOR'
                 : selected.type === 'barrier'
                   ? 'BARRERA'
-                  : 'CURVA DE NIVEL'}
+                  : selected.type === 'road'
+                    ? 'TRÁFICO VIAL · CNOSSOS-EU'
+                    : 'CURVA DE NIVEL'}
           </div>
           <h3>{selectedObject.name}</h3>
 
@@ -2605,6 +2702,63 @@ function App() {
               )}
               <div className="engine-note">
                 Este nivel puntual incorpora distancia 3D, atmósfera, efecto de suelo, barreras y las cotas interpoladas de las curvas de nivel. El mapa de colores completo se actualiza solo al pulsar “Calcular mapa”.
+              </div>
+            </>
+          )}
+
+          {selected.type === 'road' && (
+            <>
+              <div className="status-toggle">
+                <button className={!selectedObject.enabled ? 'active off' : ''} onClick={() => patchSelected({ enabled:false })}>Off</button>
+                <button className={selectedObject.enabled ? 'active on' : ''} onClick={() => patchSelected({ enabled:true })}>On</button>
+              </div>
+
+              <label>Nombre de la vía</label>
+              <input type="text" value={selectedObject.name}
+                onChange={e => patchSelected({ name:e.target.value })} />
+
+              <div className="calculated-field">
+                <span>Longitud modelada</span>
+                <strong>{polylineLengthMeters(selectedObject.points).toFixed(1)} m</strong>
+              </div>
+
+              <h4 className="subheading">Tráfico conocido</h4>
+              <div className="road-traffic-grid">
+                <div className="road-traffic-head"><span>Categoría</span><span>veh/h</span><span>km/h</span></div>
+                <div className="road-traffic-row">
+                  <span>Livianos · Cat. 1</span>
+                  <input type="number" min="0" value={selectedObject.q_light_vph}
+                    onChange={e => patchSelected({ q_light_vph:Math.max(0, Number(e.target.value)) })} />
+                  <input type="number" min="1" value={selectedObject.speed_light_kmh}
+                    onChange={e => patchSelected({ speed_light_kmh:Math.max(1, Number(e.target.value)) })} />
+                </div>
+                <div className="road-traffic-row">
+                  <span>Medianos · Cat. 2</span>
+                  <input type="number" min="0" value={selectedObject.q_medium_vph}
+                    onChange={e => patchSelected({ q_medium_vph:Math.max(0, Number(e.target.value)) })} />
+                  <input type="number" min="1" value={selectedObject.speed_medium_kmh}
+                    onChange={e => patchSelected({ speed_medium_kmh:Math.max(1, Number(e.target.value)) })} />
+                </div>
+                <div className="road-traffic-row">
+                  <span>Pesados · Cat. 3</span>
+                  <input type="number" min="0" value={selectedObject.q_heavy_vph}
+                    onChange={e => patchSelected({ q_heavy_vph:Math.max(0, Number(e.target.value)) })} />
+                  <input type="number" min="1" value={selectedObject.speed_heavy_kmh}
+                    onChange={e => patchSelected({ speed_heavy_kmh:Math.max(1, Number(e.target.value)) })} />
+                </div>
+              </div>
+
+              <div className="calculated-field">
+                <span>Flujo total</span>
+                <strong>{(
+                  Number(selectedObject.q_light_vph || 0) +
+                  Number(selectedObject.q_medium_vph || 0) +
+                  Number(selectedObject.q_heavy_vph || 0)
+                ).toFixed(0)} veh/h</strong>
+              </div>
+
+              <div className="engine-note">
+                Emisión por octavas 63 Hz–8 kHz según CNOSSOS-EU, con fuente equivalente a 0,05 m sobre la calzada. La propagación utiliza el motor exterior educativo actual.
               </div>
             </>
           )}
@@ -2929,6 +3083,12 @@ function App() {
           Barrera · {barrierHover
             ? haversineMeters(barrierStart[0], barrierStart[1], barrierHover[0], barrierHover[1]).toFixed(1)
             : '0.0'} m · selecciona el segundo extremo
+        </div>
+      )}
+
+      {mode === 'road' && (
+        <div className="status-pill">
+          Tráfico vial · {roadDraft.length} vértices · dibuja el eje de la vía y pulsa “Finalizar vía”
         </div>
       )}
 
