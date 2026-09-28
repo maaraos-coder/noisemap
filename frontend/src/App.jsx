@@ -2394,8 +2394,19 @@ function App() {
                 </div>
 
                 <div className="profile-note">
-                  Puedes modificar aquí mismo las alturas de fuente, barrera y receptor. Los valores cambian los objetos reales del mapa y el perfil se recalcula automáticamente. La sección usa terreno plano por ahora; cuando conectemos las curvas de nivel al motor, este mismo perfil incorporará la topografía.
+                  Puedes modificar aquí mismo las alturas de fuente, barrera y receptor. El perfil se recalcula automáticamente. Pulsa “Guardar cambios en el mapa” para volver al escenario con esta geometría aplicada.
                 </div>
+
+                <button
+                  type="button"
+                  className="profile-save-map-button"
+                  onClick={() => {
+                    setDirty(true)
+                    setBarrierProfileOpen(false)
+                  }}
+                >
+                  Guardar cambios en el mapa
+                </button>
               </>
             )
           })()}
