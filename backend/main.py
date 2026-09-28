@@ -95,11 +95,13 @@ def _source_spectral_result(
     lon0: float,
     terrain_samples=None,
     receiver_ground_elevation_m: Optional[float] = None,
+    source_ground_elevation_m: Optional[float] = None,
 ):
     adjustment = _source_adjustment_db(source_input)
-    source_ground_elevation_m = _terrain_elevation(
-        terrain_samples, source_input.lat, source_input.lon, lat0, lon0
-    )
+    if source_ground_elevation_m is None:
+        source_ground_elevation_m = _terrain_elevation(
+            terrain_samples, source_input.lat, source_input.lon, lat0, lon0
+        )
     if receiver_ground_elevation_m is None:
         receiver_ground_elevation_m = _terrain_elevation(
             terrain_samples, receiver_lat, receiver_lon, lat0, lon0
@@ -243,6 +245,7 @@ def _combined_spectral_level_at_point(
     lon0,
     terrain_samples=None,
     receiver_ground_elevation_m: Optional[float] = None,
+    source_ground_elevations=None,
 ):
     totals = []
     for source_input in source_inputs:
@@ -259,6 +262,10 @@ def _combined_spectral_level_at_point(
             lon0,
             terrain_samples=terrain_samples,
             receiver_ground_elevation_m=receiver_ground_elevation_m,
+            source_ground_elevation_m=(
+                source_ground_elevations.get(source_input.id)
+                if source_ground_elevations is not None else None
+            ),
         )
         if result["total_db"] is not None and np.isfinite(result["total_db"]):
             totals.append(result["total_db"])
@@ -793,6 +800,10 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     receiver_ground_elevation_m = _terrain_elevation(
         terrain_samples, payload.receiver.lat, payload.receiver.lon, lat0, lon0
     )
+    source_ground_elevations = {
+        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        for source in payload.sources
+    }
 
     barriers = [
         Barrier(
@@ -847,6 +858,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lon0,
             terrain_samples=terrain_samples,
             receiver_ground_elevation_m=receiver_ground_elevation_m,
+            source_ground_elevation_m=source_ground_elevations.get(source.id),
         )
 
         # Explicit 3D geometry diagnostic using the same propagation engine.
@@ -858,9 +870,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             lw_db=float(source.lw_db),
             dc_db=source.dc_db,
             enabled=source.enabled,
-            ground_elevation_m=_terrain_elevation(
-                terrain_samples, source.lat, source.lon, lat0, lon0
-            ),
+            ground_elevation_m=source_ground_elevations.get(source.id, 0.0),
         )
         diag = source_to_point_breakdown(
             diagnostic_source,
@@ -1124,6 +1134,10 @@ def calculate(payload: CalculationRequest):
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
+    source_ground_elevations = {
+        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        for source in payload.sources
+    }
     for barrier_model, barrier_input in zip(barriers, payload.barriers):
         barrier_model.ground_elevation_m = _terrain_elevation(
             terrain_samples,
@@ -1161,6 +1175,7 @@ def calculate(payload: CalculationRequest):
                 lon0,
                 terrain_samples=terrain_samples,
                 receiver_ground_elevation_m=receiver_ground,
+                source_ground_elevations=source_ground_elevations,
             )
 
             if np.isfinite(level):
@@ -1196,6 +1211,7 @@ def calculate(payload: CalculationRequest):
                 lon0,
                 terrain_samples=terrain_samples,
                 receiver_ground_elevation_m=receiver_ground,
+                source_ground_elevation_m=source_ground_elevations.get(source_input.id),
             )
 
             source_total = source_result.get("total_db")
