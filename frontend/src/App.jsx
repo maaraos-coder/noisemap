@@ -1782,6 +1782,56 @@ function App() {
           </Source>
         )}
 
+        {layers.buildings && (
+          <Source id="buildings" type="geojson" data={buildingData}>
+            <Layer
+              id="buildings-fill"
+              type="fill"
+              paint={{
+                'fill-color': '#7c8793',
+                'fill-opacity': 0.28
+              }}
+            />
+            <Layer
+              id="buildings-line"
+              type="line"
+              paint={{
+                'line-color': '#3f4a55',
+                'line-width': 2.5
+              }}
+            />
+          </Source>
+        )}
+
+        {mode === 'building' && buildingDraft.length >= 2 && (
+          <Source id="building-draft" type="geojson" data={buildingDraftData}>
+            <Layer
+              id="building-draft-line"
+              type="line"
+              paint={{
+                'line-color': '#3f4a55',
+                'line-width': 3,
+                'line-dasharray': [2, 1.5]
+              }}
+            />
+          </Source>
+        )}
+
+        {mode === 'building' && buildingDraft.map(([lat, lon], index) => (
+          <Marker
+            key={`building-draft-${index}`}
+            longitude={lon}
+            latitude={lat}
+            anchor="center"
+            onClick={e => e.originalEvent.stopPropagation()}
+          >
+            <div className={`building-draft-vertex ${index === 0 ? 'first' : ''}`}>
+              <span>{index + 1}</span>
+              {index === 0 && <b>INICIO</b>}
+            </div>
+          </Marker>
+        ))}
+
         {layers.roads && (
           <Source id="roads" type="geojson" data={roadData}>
             <Layer
@@ -1864,6 +1914,30 @@ function App() {
             />
           </Source>
         )}
+
+        {layers.buildings && buildings.map(building => {
+          if (!building.enabled || !building.points?.length) return null
+          const lat = building.points.reduce((sum, p) => sum + Number(p[0]), 0) / building.points.length
+          const lon = building.points.reduce((sum, p) => sum + Number(p[1]), 0) / building.points.length
+          return (
+            <Marker
+              key={building.id}
+              longitude={lon}
+              latitude={lat}
+              anchor="center"
+              onClick={e => {
+                e.originalEvent.stopPropagation()
+                setBuildingFacadeIndex(0)
+                setSelected({ type: 'building', id: building.id })
+              }}
+            >
+              <div className="building-label" title={building.name}>
+                <strong>{building.name}</strong>
+                <span>{Number(building.height_m).toFixed(1)} m</span>
+              </div>
+            </Marker>
+          )
+        })}
 
         {layers.sources && sources.map(source => (
           <Marker
