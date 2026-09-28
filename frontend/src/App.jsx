@@ -118,6 +118,44 @@ function raysGeoJSON(sources, receivers, rayMode) {
   return { type: 'FeatureCollection', features }
 }
 
+
+function contoursGeoJSON(contours) {
+  return {
+    type: 'FeatureCollection',
+    features: contours
+      .filter(c => c.points?.length >= 2)
+      .map(c => ({
+        type: 'Feature',
+        properties: {
+          id: c.id,
+          name: c.name,
+          elevation_m: c.elevation_m
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: c.points.map(([lat, lon]) => [lon, lat])
+        }
+      }))
+  }
+}
+
+function lineGeoJSON(points) {
+  if (!points || points.length < 2) {
+    return { type: 'FeatureCollection', features: [] }
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'LineString',
+        coordinates: points.map(([lat, lon]) => [lon, lat])
+      }
+    }]
+  }
+}
+
 function levelColor(value, vmin, vmax) {
   const t = Math.max(0, Math.min(1, (value - vmin) / Math.max(vmax - vmin, 0.001)))
   const scaled = t * (COLORS.length - 1)
@@ -226,6 +264,8 @@ function App() {
   const [receivers, setReceivers] = useState(initialReceivers)
   const [barriers, setBarriers] = useState([])
   const [accessories, setAccessories] = useState([])
+  const [contours, setContours] = useState([])
+  const [contourDraft, setContourDraft] = useState([])
   const [polygon, setPolygon] = useState(defaultPolygon)
   const [draftPolygon, setDraftPolygon] = useState([])
   const [barrierStart, setBarrierStart] = useState(null)
@@ -271,6 +311,7 @@ function App() {
     receivers: true,
     barriers: true,
     accessories: true,
+    contours: true,
     rays: true,
     area: true
   })
@@ -291,6 +332,8 @@ function App() {
     }
   }, [barrierStart, barrierHover])
   const accessoryData = useMemo(() => accessoriesGeoJSON(accessories), [accessories])
+  const contourData = useMemo(() => contoursGeoJSON(contours), [contours])
+  const contourDraftData = useMemo(() => lineGeoJSON(contourDraft), [contourDraft])
   const rayData = useMemo(() => raysGeoJSON(sources, receivers, rayMode), [sources, receivers, rayMode])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
   const draftData = useMemo(() => polygonGeoJSON(draftPolygon), [draftPolygon])
@@ -310,7 +353,7 @@ function App() {
 
   useEffect(() => {
     setDirty(true)
-  }, [sources, barriers, polygon, resolution, height, alpha, frequency, vmin, vmax, globalSettings])
+  }, [sources, barriers, contours, polygon, resolution, height, alpha, frequency, vmin, vmax, globalSettings])
 
   const onMapMouseMove = event => {
     if (mode === 'barrier' && barrierStart) {
@@ -402,6 +445,11 @@ function App() {
       return
     }
 
+    if (mode === 'contour') {
+      setContourDraft(prev => [...prev, [lat, lng]])
+      return
+    }
+
     if (mode === 'area') {
       setDraftPolygon(prev => [...prev, [lat, lng]])
     }
@@ -454,6 +502,20 @@ function App() {
     }
   }
 
+  const finishContour = () => {
+    if (contourDraft.length < 2) return
+    const item = {
+      id: crypto.randomUUID(),
+      name: `Curva de nivel ${contours.length + 1}`,
+      elevation_m: 500,
+      points: contourDraft
+    }
+    setContours(prev => [...prev, item])
+    setContourDraft([])
+    setSelected({ type: 'contour', id: item.id })
+    setMode('navigate')
+  }
+
   const finishArea = () => {
     if (draftPolygon.length >= 3) {
       setPolygon(draftPolygon)
@@ -464,6 +526,7 @@ function App() {
 
   const cancelDrawing = () => {
     setDraftPolygon([])
+    setContourDraft([])
     setBarrierStart(null)
     setBarrierHover(null)
     setLineStart(null)
@@ -509,6 +572,7 @@ function App() {
     if (selected.type === 'source') return sources.find(x => x.id === selected.id)
     if (selected.type === 'receiver') return receivers.find(x => x.id === selected.id)
     if (selected.type === 'barrier') return barriers.find(x => x.id === selected.id)
+    if (selected.type === 'contour') return contours.find(x => x.id === selected.id)
     return null
   })()
 
@@ -534,6 +598,8 @@ function App() {
       setReceivers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    } else if (selected.type === 'contour') {
+      setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     }
   }
 
@@ -545,6 +611,8 @@ function App() {
       setReceivers(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'barrier') {
       setBarriers(prev => prev.filter(x => x.id !== selected.id))
+    } else if (selected.type === 'contour') {
+      setContours(prev => prev.filter(x => x.id !== selected.id))
     }
     setSelected(null)
   }
@@ -555,7 +623,7 @@ function App() {
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
 
       if (event.key === 'Escape') {
-        if (barrierStart || lineStart || draftPolygon.length) {
+        if (barrierStart || lineStart || draftPolygon.length || contourDraft.length) {
           cancelDrawing()
         } else if (selected) {
           setSelected(null)
@@ -571,7 +639,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon])
+  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft])
 
   const imageCoordinates = result?.bounds
     ? [
@@ -694,6 +762,34 @@ function App() {
         )}
 
 
+        {layers.contours && (
+          <Source id="contours" type="geojson" data={contourData}>
+            <Layer
+              id="contours-line"
+              type="line"
+              paint={{
+                'line-color': '#8b5a2b',
+                'line-width': 2.2,
+                'line-opacity': 0.9
+              }}
+            />
+          </Source>
+        )}
+
+        {mode === 'contour' && contourDraft.length >= 2 && (
+          <Source id="contour-draft" type="geojson" data={contourDraftData}>
+            <Layer
+              id="contour-draft-line"
+              type="line"
+              paint={{
+                'line-color': '#8b5a2b',
+                'line-width': 2.5,
+                'line-dasharray': [2, 1.5]
+              }}
+            />
+          </Source>
+        )}
+
         {layers.accessories && (
           <Source id="accessories" type="geojson" data={accessoryData}>
             <Layer
@@ -815,6 +911,25 @@ function App() {
           </Marker>
         ]))}
 
+        {layers.contours && contours.map(contour => {
+          const mid = contour.points[Math.floor(contour.points.length / 2)]
+          if (!mid) return null
+          return (
+            <Marker
+              key={`contour-label-${contour.id}`}
+              longitude={mid[1]}
+              latitude={mid[0]}
+              anchor="center"
+              onClick={e => {
+                e.originalEvent.stopPropagation()
+                setSelected({ type: 'contour', id: contour.id })
+              }}
+            >
+              <div className="contour-label">{Number(contour.elevation_m).toFixed(0)} m</div>
+            </Marker>
+          )
+        })}
+
         {mode === 'edit-area' && polygon.map(([lat, lon], index) => (
           <Marker
             key={`polygon-vertex-${index}`}
@@ -852,6 +967,10 @@ function App() {
           <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor (R)" onClick={() => setMode('receiver')} />
           <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
           <IconButton active={mode === 'line'} title="Auxiliar gráfico: solo dibujo, no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => setMode('line')} />
+          <IconButton active={mode === 'contour'} title="Dibujar curva de nivel y asignar cota" icon="≋" label="Curva nivel" onClick={() => {
+            setContourDraft([])
+            setMode('contour')
+          }} />
           <IconButton active={mode === 'area'} title="Dibujar área de cálculo" icon="▱" label="Área" onClick={() => {
             setDraftPolygon([])
             setMode('area')
@@ -880,13 +999,19 @@ function App() {
           )}
         </div>
 
+        {mode === 'contour' && contourDraft.length >= 2 && (
+          <div className="object-toolbar-confirm contour-confirm">
+            <button className="tool-action" onClick={finishContour}>Finalizar curva</button>
+          </div>
+        )}
+
         {mode === 'area' && draftPolygon.length >= 3 && (
           <div className="object-toolbar-confirm">
             <button className="tool-action" onClick={finishArea}>Cerrar área</button>
           </div>
         )}
 
-        {(mode === 'area' || barrierStart || lineStart) && (
+        {(mode === 'area' || mode === 'contour' || barrierStart || lineStart) && (
           <div className="object-toolbar-confirm">
             <button className="tool-action ghost" onClick={cancelDrawing}>Cancelar</button>
           </div>
@@ -955,6 +1080,7 @@ function App() {
             ['receivers', 'Receptores'],
             ['barriers', 'Barreras'],
             ['accessories', 'Líneas auxiliares'],
+            ['contours', 'Curvas de nivel'],
             ['rays', 'Rayos fuente–receptor'],
             ['area', 'Área de cálculo']
           ].map(([key, label]) => (
@@ -1226,11 +1352,17 @@ function App() {
         <div className="object-card advanced-object-card">
           <button className="close-card" onClick={() => setSelected(null)}>×</button>
           <div className="object-type">
-            {selected.type === 'source' ? 'FUENTE PUNTUAL' : selected.type === 'receiver' ? 'RECEPTOR' : 'BARRERA'}
+            {selected.type === 'source'
+              ? 'FUENTE PUNTUAL'
+              : selected.type === 'receiver'
+                ? 'RECEPTOR'
+                : selected.type === 'barrier'
+                  ? 'BARRERA'
+                  : 'CURVA DE NIVEL'}
           </div>
           <h3>{selectedObject.name}</h3>
 
-          {selected.type !== 'barrier' && (
+          {(selected.type === 'source' || selected.type === 'receiver') && (
             <div className="coordinate-row">
               <span>{selectedObject.lat.toFixed(6)}</span>
               <span>{selectedObject.lon.toFixed(6)}</span>
@@ -1405,6 +1537,29 @@ function App() {
             </>
           )}
 
+          {selected.type === 'contour' && (
+            <>
+              <div className="calculated-field">
+                <span>Tipo</span>
+                <strong>Topografía</strong>
+              </div>
+              <label>Cota [m s.n.m.]</label>
+              <input
+                type="number"
+                step="0.1"
+                value={selectedObject.elevation_m}
+                onChange={e => patchSelected({ elevation_m: Number(e.target.value) })}
+              />
+              <div className="calculated-field">
+                <span>Vértices</span>
+                <strong>{selectedObject.points.length}</strong>
+              </div>
+              <div className="engine-note">
+                Esta curva representa una cota del terreno. En la siguiente etapa se usará junto con las demás curvas para interpolar la superficie topográfica y obtener perfiles F–R.
+              </div>
+            </>
+          )}
+
           <button className="delete-button" onClick={removeSelected}>Eliminar elemento</button>
         </div>
       )}
@@ -1419,6 +1574,12 @@ function App() {
 
       {mode === 'line' && lineStart && (
         <div className="status-pill">Auxiliar gráfico · selecciona el segundo extremo · no afecta el cálculo acústico</div>
+      )}
+
+      {mode === 'contour' && (
+        <div className="status-pill">
+          Curva de nivel · {contourDraft.length} vértices · haz clic para seguir trazando y pulsa “Finalizar curva”
+        </div>
       )}
 
       {mode === 'area' && (
