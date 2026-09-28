@@ -176,6 +176,34 @@ function haversineMeters(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa))
 }
 
+
+const A_CORRECTIONS = {63:-26.2,125:-16.1,250:-8.6,500:-3.2,1000:0,2000:1.2,4000:1.0,8000:-1.1}
+
+function energeticTotal(values) {
+  const finite = values.filter(v => Number.isFinite(v))
+  if (!finite.length) return null
+  const sum = finite.reduce((acc, v) => acc + Math.pow(10, v / 10), 0)
+  return 10 * Math.log10(sum)
+}
+
+function sourceEquivalentLevel(source, aWeighting) {
+  if (source.spectrum_mode === 'octaves') {
+    const vals = Object.entries(source.octave_levels || {}).map(([f, level]) => {
+      const correction = aWeighting ? (A_CORRECTIONS[Number(f)] || 0) : 0
+      return Number(level) + correction
+    })
+    return energeticTotal(vals) ?? Number(source.lw_db)
+  }
+  if (source.spectrum_mode === 'single') {
+    const nearest = Object.keys(A_CORRECTIONS)
+      .map(Number)
+      .sort((a,b) => Math.abs(a - source.single_frequency_hz) - Math.abs(b - source.single_frequency_hz))[0]
+    const correction = aWeighting ? (A_CORRECTIONS[nearest] || 0) : 0
+    return Number(source.lw_db) + correction
+  }
+  return Number(source.lw_db)
+}
+
 function IconButton({ active, title, icon, label, onClick }) {
   return (
     <button
@@ -363,7 +391,11 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sources,
+          sources: sources.map(source => ({
+            ...source,
+            lw_db: sourceEquivalentLevel(source, globalSettings.a_weighting)
+          })),
+          receivers,
           barriers,
           polygon,
           settings: {
@@ -453,6 +485,10 @@ function App() {
     if (selected.type === 'barrier') return barriers.find(x => x.id === selected.id)
     return null
   })()
+
+  const selectedReceiverResult = selected?.type === 'receiver'
+    ? result?.receiver_results?.find(item => item.id === selected.id)
+    : null
 
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
@@ -1048,7 +1084,7 @@ function App() {
       </div>
 
       {selectedObject && (
-        <div className="object-card">
+        <div className="object-card advanced-object-card">
           <button className="close-card" onClick={() => setSelected(null)}>×</button>
           <div className="object-type">
             {selected.type === 'source' ? 'FUENTE PUNTUAL' : selected.type === 'receiver' ? 'RECEPTOR' : 'BARRERA'}
@@ -1064,26 +1100,99 @@ function App() {
 
           {selected.type === 'source' && (
             <>
-              <label>Potencia sonora Lw [dB]</label>
-              <input
-                type="number"
-                value={selectedObject.lw_db}
-                onChange={e => patchSelected({ lw_db: Number(e.target.value) })}
-              />
+              <div className="status-toggle">
+                <button className={!selectedObject.enabled ? 'active off' : ''} onClick={() => patchSelected({ enabled:false })}>Off</button>
+                <button className={selectedObject.enabled ? 'active on' : ''} onClick={() => patchSelected({ enabled:true })}>On</button>
+              </div>
+
               <label>Altura [m]</label>
-              <input
-                type="number"
-                step="0.1"
-                value={selectedObject.height_m}
-                onChange={e => patchSelected({ height_m: Number(e.target.value) })}
-              />
+              <input type="number" step="0.1" value={selectedObject.height_m}
+                onChange={e => patchSelected({ height_m:Number(e.target.value) })} />
+
+              <div className="spectrum-tabs">
+                {[
+                  ['broadband','Broadband'],
+                  ['single','Single'],
+                  ['octaves','Octavas']
+                ].map(([value,label]) => (
+                  <button key={value}
+                    className={selectedObject.spectrum_mode === value ? 'active' : ''}
+                    onClick={() => patchSelected({ spectrum_mode:value })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <h4 className="subheading">Niveles de potencia sonora</h4>
+
+              {selectedObject.spectrum_mode === 'broadband' && (
+                <div className="inline-field">
+                  <span>LwA</span>
+                  <input type="number" value={selectedObject.lw_db}
+                    onChange={e => patchSelected({ lw_db:Number(e.target.value) })} />
+                  <b>dB(A)</b>
+                </div>
+              )}
+
+              {selectedObject.spectrum_mode === 'single' && (
+                <>
+                  <div className="inline-field">
+                    <span>Frecuencia</span>
+                    <input type="number" value={selectedObject.single_frequency_hz}
+                      onChange={e => patchSelected({ single_frequency_hz:Number(e.target.value) })} />
+                    <b>Hz</b>
+                  </div>
+                  <div className="inline-field">
+                    <span>Nivel</span>
+                    <input type="number" value={selectedObject.lw_db}
+                      onChange={e => patchSelected({ lw_db:Number(e.target.value) })} />
+                    <b>dB</b>
+                  </div>
+                  <div className="calculated-field">
+                    <span>Equivalente {globalSettings.a_weighting ? 'A' : 'Z'}</span>
+                    <strong>{sourceEquivalentLevel(selectedObject, globalSettings.a_weighting).toFixed(1)} dB</strong>
+                  </div>
+                </>
+              )}
+
+              {selectedObject.spectrum_mode === 'octaves' && (
+                <>
+                  <div className="octave-grid">
+                    {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                      <label key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
+                        <input type="number"
+                          value={selectedObject.octave_levels?.[freq] ?? ''}
+                          onChange={e => patchSelected({
+                            octave_levels:{
+                              ...(selectedObject.octave_levels || {}),
+                              [freq]:Number(e.target.value)
+                            }
+                          })} />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="calculated-field">
+                    <span>Total energético {globalSettings.a_weighting ? 'A' : 'Z'}</span>
+                    <strong>{sourceEquivalentLevel(selectedObject, globalSettings.a_weighting).toFixed(1)} dB</strong>
+                  </div>
+                </>
+              )}
+
+              <div className="two-field-grid">
+                <label>Ajuste [dB]
+                  <input type="number" step="0.5" value={selectedObject.adjust_db}
+                    onChange={e => patchSelected({ adjust_db:Number(e.target.value) })} />
+                </label>
+                <label>% tiempo activo
+                  <input type="number" min="0.1" max="100" value={selectedObject.time_active_pct}
+                    onChange={e => patchSelected({ time_active_pct:Number(e.target.value) })} />
+                </label>
+              </div>
+
               <label>Directividad Dc [dB]</label>
-              <input
-                type="number"
-                step="0.5"
-                value={selectedObject.dc_db}
-                onChange={e => patchSelected({ dc_db: Number(e.target.value) })}
-              />
+              <input type="number" step="0.5" value={selectedObject.dc_db}
+                onChange={e => patchSelected({ dc_db:Number(e.target.value) })} />
 
               {nearestReceiverDistance && (
                 <div className="distance-card">
@@ -1092,30 +1201,64 @@ function App() {
                   <b>{nearestReceiverDistance.distance.toFixed(1)} m</b>
                 </div>
               )}
+
+              <div className="engine-note">
+                Octavas y Single se reducen a un nivel equivalente para el motor V3. La propagación espectral por banda se incorporará en el motor V4.
+              </div>
             </>
           )}
 
           {selected.type === 'receiver' && (
             <>
+              <div className="status-toggle">
+                <button className={selectedObject.visible === false ? 'active off' : ''} onClick={() => patchSelected({ visible:false })}>Oculto</button>
+                <button className={selectedObject.visible !== false ? 'active on' : ''} onClick={() => patchSelected({ visible:true })}>Visible</button>
+              </div>
+
+              <div className="spectrum-tabs">
+                <button className={selectedObject.height_mode === 'map' ? 'active' : ''} onClick={() => patchSelected({ height_mode:'map', height_m:height })}>Igualar mapa</button>
+                <button className={selectedObject.height_mode === 'specify' ? 'active' : ''} onClick={() => patchSelected({ height_mode:'specify' })}>Especificar</button>
+              </div>
+
               <label>Altura [m]</label>
-              <input
-                type="number"
-                step="0.1"
-                value={selectedObject.height_m}
-                onChange={e => patchSelected({ height_m: Number(e.target.value) })}
-              />
+              <input type="number" step="0.1" value={selectedObject.height_m}
+                disabled={selectedObject.height_mode === 'map'}
+                onChange={e => patchSelected({ height_m:Number(e.target.value) })} />
+
+              <h4 className="subheading">Resultado de presión sonora</h4>
+              <div className="receiver-result">
+                <span>Nivel total</span>
+                <strong>
+                  {selectedReceiverResult?.level_db != null
+                    ? selectedReceiverResult.level_db.toFixed(1) + ' dB'
+                    : 'Sin calcular'}
+                </strong>
+              </div>
+              <div className="engine-note">El resultado puntual se actualiza cada vez que calculas el mapa.</div>
             </>
           )}
 
           {selected.type === 'barrier' && (
             <>
+              <div className="status-toggle">
+                <button className={!selectedObject.enabled ? 'active off' : ''} onClick={() => patchSelected({ enabled:false })}>Off</button>
+                <button className={selectedObject.enabled ? 'active on' : ''} onClick={() => patchSelected({ enabled:true })}>On</button>
+              </div>
               <label>Altura superior [m]</label>
-              <input
-                type="number"
-                step="0.1"
-                value={selectedObject.height_m}
-                onChange={e => patchSelected({ height_m: Number(e.target.value) })}
-              />
+              <input type="number" step="0.1" value={selectedObject.height_m}
+                onChange={e => patchSelected({ height_m:Number(e.target.value) })} />
+
+              <h4 className="subheading">Reflexiones</h4>
+              <div className="segmented">
+                {[0,50,100].map(value => (
+                  <button key={value}
+                    className={(selectedObject.reflection_percent || 0) === value ? 'active' : ''}
+                    onClick={() => patchSelected({ reflection_percent:value })}>
+                    {value === 0 ? 'Ninguna' : value + '%'}
+                  </button>
+                ))}
+              </div>
+              <div className="engine-note">La atenuación por barrera sí participa en V3. La reflexión de la superficie queda almacenada para el motor con reflexiones.</div>
             </>
           )}
 
