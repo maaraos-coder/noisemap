@@ -2698,3 +2698,69 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Traffic road source */
+.road-handle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #111827;
+  border: 3px solid #ffffff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.35);
+  cursor: grab;
+}
+
+.road-label {
+  background: rgba(17,24,39,.94);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.22);
+  cursor: pointer;
+}
+
+.road-traffic-grid {
+  display: grid;
+  gap: 7px;
+  margin: 7px 0 10px;
+}
+
+.road-traffic-head,
+.road-traffic-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.5fr) minmax(64px, .7fr) minmax(64px, .7fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.road-traffic-head {
+  color: #667085;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.road-traffic-row > span {
+  font-size: 11px;
+  font-weight: 700;
+  color: #263143;
+}
+
+.road-traffic-row input {
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .road-traffic-head,
+  .road-traffic-row {
+    grid-template-columns: minmax(105px, 1.2fr) 72px 72px;
+    gap: 5px;
+  }
+}
