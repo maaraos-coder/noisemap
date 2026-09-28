@@ -1423,6 +1423,18 @@ function App() {
     setSelected(null)
   }
 
+  const removeCalculationArea = () => {
+    if (!polygon.length) return
+    const confirmed = window.confirm('¿Eliminar completamente el área de cálculo?')
+    if (!confirmed) return
+
+    setPolygon([])
+    setDraftPolygon([])
+    setResult(null)
+    setMode('navigate')
+    setSelected(null)
+  }
+
   useEffect(() => {
     const handleKeyDown = event => {
       const activeTag = document.activeElement?.tagName
@@ -1437,6 +1449,12 @@ function App() {
         return
       }
 
+      if (event.key === 'Delete' && mode === 'edit-area' && polygon.length && !editing) {
+        event.preventDefault()
+        removeCalculationArea()
+        return
+      }
+
       if (event.key === 'Delete' && selected && !editing) {
         event.preventDefault()
         removeSelected()
@@ -1445,7 +1463,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft, roadDraft])
+  }, [selected, barrierStart, lineStart, draftPolygon, contourDraft, roadDraft, mode, polygon])
 
   const imageCoordinates = result?.bounds
     ? [
@@ -1903,6 +1921,17 @@ function App() {
             setMode('area')
           }} />
           <IconButton active={mode === 'edit-area'} title="Editar área de cálculo" icon="◇" label="Editar" onClick={() => setMode('edit-area')} />
+          {mode === 'edit-area' && polygon.length >= 3 && (
+            <button
+              type="button"
+              className="bottom-context-action danger"
+              onClick={removeCalculationArea}
+              title="Eliminar completamente el área de cálculo"
+            >
+              <span className="context-icon">⌫</span>
+              <span>Eliminar área</span>
+            </button>
+          )}
           {mode === 'road' && roadDraft.length >= 2 && (
             <button
               type="button"
