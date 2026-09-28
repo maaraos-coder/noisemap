@@ -408,6 +408,8 @@ function App() {
   const [result, setResult] = useState(null)
   const [calculating, setCalculating] = useState(false)
   const [calculationStatus, setCalculationStatus] = useState('')
+  const [receiverPreview, setReceiverPreview] = useState(null)
+  const [receiverPreviewLoading, setReceiverPreviewLoading] = useState(false)
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -1147,6 +1149,69 @@ function App() {
     setBarrierProfileOpen(false)
     setProfileDraft(null)
   }
+
+  useEffect(() => {
+    if (selected?.type !== 'receiver' || !selectedObject) {
+      setReceiverPreview(null)
+      setReceiverPreviewLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      setReceiverPreviewLoading(true)
+      try {
+        const response = await fetch(`${API_BASE}/api/receiver-preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sources,
+            receiver: selectedObject,
+            barriers,
+            settings: {
+              resolution,
+              receiver_height_m: selectedObject.height_m,
+              alpha_db_per_km: alpha,
+              frequency_hz: frequency,
+              vmin,
+              vmax,
+              prediction_model: globalSettings.prediction_model,
+              a_weighting: globalSettings.a_weighting,
+              ground_factor: globalSettings.ground_factor,
+              temperature_c: globalSettings.temperature_c,
+              humidity_pct: globalSettings.humidity_pct,
+              max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
+              reflections_enabled: globalSettings.reflection_order !== 'none'
+            }
+          })
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`)
+        if (!cancelled) setReceiverPreview(data)
+      } catch (error) {
+        console.error('Vista previa de receptor:', error)
+        if (!cancelled) setReceiverPreview(null)
+      } finally {
+        if (!cancelled) setReceiverPreviewLoading(false)
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [
+    selected,
+    selectedObject,
+    sources,
+    barriers,
+    alpha,
+    frequency,
+    vmin,
+    vmax,
+    resolution,
+    globalSettings
+  ])
 
   const selectedReceiverResult = selected?.type === 'receiver'
     ? result?.receiver_results?.find(item => item.id === selected.id)
@@ -2387,29 +2452,34 @@ function App() {
 
               <h4 className="subheading">Resultado de presión sonora</h4>
               <div className="receiver-result">
-                <span>Nivel total</span>
+                <span>{receiverPreviewLoading ? 'Actualizando…' : 'Nivel puntual en vivo'}</span>
                 <strong>
-                  {selectedReceiverResult?.level_db != null
-                    ? selectedReceiverResult.level_db.toFixed(1) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
-                    : 'Sin calcular'}
+                  {receiverPreview?.level_db != null
+                    ? Number(receiverPreview.level_db).toFixed(2) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
+                    : selectedReceiverResult?.level_db != null
+                      ? Number(selectedReceiverResult.level_db).toFixed(2) + (globalSettings.a_weighting ? ' dB(A)' : ' dB')
+                      : 'Sin calcular'}
                 </strong>
               </div>
 
-              {selectedReceiverResult?.bands_db && (
+              {(receiverPreview?.bands_db || selectedReceiverResult?.bands_db) && (
                 <div className="receiver-spectrum">
-                  {[63,125,250,500,1000,2000,4000,8000].map(freq => (
-                    <div key={freq}>
-                      <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
-                      <strong>
-                        {selectedReceiverResult.bands_db[String(freq)] != null
-                          ? Number(selectedReceiverResult.bands_db[String(freq)]).toFixed(1)
-                          : '—'}
-                      </strong>
-                    </div>
-                  ))}
+                  {[63,125,250,500,1000,2000,4000,8000].map(freq => {
+                    const liveValue = receiverPreview?.bands_db?.[String(freq)]
+                    const savedValue = selectedReceiverResult?.bands_db?.[String(freq)]
+                    const value = liveValue != null ? liveValue : savedValue
+                    return (
+                      <div key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
+                        <strong>{value != null ? Number(value).toFixed(1) : '—'}</strong>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
-              <div className="engine-note">El resultado puntual se actualiza cada vez que calculas el mapa.</div>
+              <div className="engine-note">
+                Este nivel puntual se recalcula automáticamente al cambiar la altura del receptor. El mapa de colores completo se actualiza solo al pulsar “Calcular mapa”.
+              </div>
             </>
           )}
 
