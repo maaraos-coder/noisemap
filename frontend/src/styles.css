@@ -1671,6 +1671,18 @@ select {
   background: #e3e7ea;
 }
 
+
+.bottom-context-action.danger {
+  background: #fff1f1;
+  color: #a52c36;
+  border-left-color: #efc4c8;
+}
+
+.bottom-context-action.danger:hover {
+  background: #fbe1e3;
+  color: #8f1f29;
+}
+
 .context-icon {
   font-size: 16px;
   line-height: 16px;
