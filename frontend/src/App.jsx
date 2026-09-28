@@ -43,6 +43,27 @@ function polygonGeoJSON(points) {
   }
 }
 
+function buildingsGeoJSON(buildings) {
+  return {
+    type: 'FeatureCollection',
+    features: buildings
+      .filter(building => building.enabled && building.points?.length >= 3)
+      .map(building => {
+        const ring = building.points.map(([lat, lon]) => [lon, lat])
+        ring.push(ring[0])
+        return {
+          type: 'Feature',
+          properties: {
+            id: building.id,
+            name: building.name,
+            height_m: building.height_m
+          },
+          geometry: { type: 'Polygon', coordinates: [ring] }
+        }
+      })
+  }
+}
+
 function barriersGeoJSON(barriers) {
   return {
     type: 'FeatureCollection',
@@ -360,6 +381,9 @@ function App() {
   const [sources, setSources] = useState(initialSources)
   const [receivers, setReceivers] = useState(initialReceivers)
   const [barriers, setBarriers] = useState([])
+  const [buildings, setBuildings] = useState([])
+  const [buildingDraft, setBuildingDraft] = useState([])
+  const [buildingFacadeIndex, setBuildingFacadeIndex] = useState(0)
   const [roads, setRoads] = useState([])
   const [roadDraft, setRoadDraft] = useState([])
   const [accessories, setAccessories] = useState([])
@@ -429,6 +453,7 @@ function App() {
     sources: true,
     receivers: true,
     barriers: true,
+    buildings: true,
     roads: true,
     accessories: true,
     contours: true,
@@ -437,6 +462,8 @@ function App() {
   })
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
+  const buildingData = useMemo(() => buildingsGeoJSON(buildings), [buildings])
+  const buildingDraftData = useMemo(() => polygonGeoJSON(buildingDraft), [buildingDraft])
   const roadData = useMemo(() => roadsGeoJSON(roads), [roads])
   const roadDraftData = useMemo(() => lineGeoJSON(roadDraft), [roadDraft])
   const barrierPreviewData = useMemo(() => {
@@ -475,7 +502,7 @@ function App() {
 
   useEffect(() => {
     setDirty(true)
-  }, [sources, receivers, barriers, roads, contours, polygon, resolution, height, alpha, frequency, globalSettings])
+  }, [sources, receivers, barriers, buildings, roads, contours, polygon, resolution, height, alpha, frequency, globalSettings])
 
   useEffect(() => {
     // Wake the free Render instance in the background as soon as the app opens.
