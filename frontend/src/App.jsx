@@ -463,7 +463,7 @@ function App() {
 
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
   const buildingData = useMemo(() => buildingsGeoJSON(buildings), [buildings])
-  const buildingDraftData = useMemo(() => polygonGeoJSON(buildingDraft), [buildingDraft])
+  const buildingDraftData = useMemo(() => lineGeoJSON(buildingDraft), [buildingDraft])
   const roadData = useMemo(() => roadsGeoJSON(roads), [roads])
   const roadDraftData = useMemo(() => lineGeoJSON(roadDraft), [roadDraft])
   const barrierPreviewData = useMemo(() => {
@@ -2122,6 +2122,29 @@ function App() {
             }}
           >
             <div className="area-vertex" title={`Vértice ${index + 1}`} />
+          </Marker>
+        ))}
+
+        {selected?.type === 'building' && selectedObject?.points?.map(([lat, lon], index) => (
+          <Marker
+            key={`building-vertex-${selectedObject.id}-${index}`}
+            longitude={lon}
+            latitude={lat}
+            draggable
+            onDragEnd={e => {
+              const { lat: newLat, lng: newLon } = e.lngLat
+              setBuildings(prev => prev.map(item =>
+                item.id === selectedObject.id
+                  ? {
+                      ...item,
+                      points: item.points.map((point, i) => i === index ? [newLat, newLon] : point)
+                    }
+                  : item
+              ))
+            }}
+            onClick={e => e.originalEvent.stopPropagation()}
+          >
+            <div className="building-edit-vertex" title={`Vértice ${index + 1}`}>{index + 1}</div>
           </Marker>
         ))}
       </Map>
