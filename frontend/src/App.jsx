@@ -464,6 +464,12 @@ function App() {
   const barrierData = useMemo(() => barriersGeoJSON(barriers), [barriers])
   const buildingData = useMemo(() => buildingsGeoJSON(buildings), [buildings])
   const buildingDraftData = useMemo(() => lineGeoJSON(buildingDraft), [buildingDraft])
+  const buildingDraftPolygonData = useMemo(() => polygonGeoJSON(buildingDraft), [buildingDraft])
+  const selectedBuildingData = useMemo(() => {
+    if (selected?.type !== 'building') return { type: 'FeatureCollection', features: [] }
+    const building = buildings.find(item => item.id === selected.id)
+    return building ? buildingsGeoJSON([building]) : { type: 'FeatureCollection', features: [] }
+  }, [selected, buildings])
   const roadData = useMemo(() => roadsGeoJSON(roads), [roads])
   const roadDraftData = useMemo(() => lineGeoJSON(roadDraft), [roadDraft])
   const barrierPreviewData = useMemo(() => {
@@ -1817,6 +1823,28 @@ function App() {
           </Source>
         )}
 
+        {layers.buildings && selected?.type === 'building' && (
+          <Source id="selected-building" type="geojson" data={selectedBuildingData}>
+            <Layer
+              id="selected-building-fill"
+              type="fill"
+              paint={{
+                'fill-color': '#111827',
+                'fill-opacity': 0.08
+              }}
+            />
+            <Layer
+              id="selected-building-line"
+              type="line"
+              paint={{
+                'line-color': '#111827',
+                'line-width': 2.2,
+                'line-dasharray': [2, 1]
+              }}
+            />
+          </Source>
+        )}
+
         {mode === 'building' && buildingDraft.length >= 2 && (
           <Source id="building-draft" type="geojson" data={buildingDraftData}>
             <Layer
@@ -1826,6 +1854,28 @@ function App() {
                 'line-color': '#3f4a55',
                 'line-width': 3,
                 'line-dasharray': [2, 1.5]
+              }}
+            />
+          </Source>
+        )}
+
+        {mode === 'building' && buildingDraft.length >= 3 && (
+          <Source id="building-draft-polygon" type="geojson" data={buildingDraftPolygonData}>
+            <Layer
+              id="building-draft-polygon-fill"
+              type="fill"
+              paint={{
+                'fill-color': '#475569',
+                'fill-opacity': 0.10
+              }}
+            />
+            <Layer
+              id="building-draft-polygon-line"
+              type="line"
+              paint={{
+                'line-color': '#1f2937',
+                'line-width': 1.5,
+                'line-dasharray': [1.5, 1]
               }}
             />
           </Source>
@@ -2317,7 +2367,7 @@ function App() {
               ? 'Haz clic para marcar el primer vértice del edificio.'
               : buildingDraft.length < 3
                 ? `Vértice ${buildingDraft.length} definido · agrega al menos ${3 - buildingDraft.length} más.`
-                : `${buildingDraft.length} vértices definidos · pulsa “Cerrar edificio”.`}
+                : `${buildingDraft.length} vértices definidos · la zona sombreada es la forma final. Pulsa “Cerrar edificio”.`}
           </span>
         </div>
       )}
