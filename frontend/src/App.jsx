@@ -274,6 +274,12 @@ function App() {
   const [rayMode, setRayMode] = useState('off')
   const [searchOpen, setSearchOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [topographyImportOpen, setTopographyImportOpen] = useState(false)
+  const [topographyFile, setTopographyFile] = useState(null)
+  const [topographyElevationField, setTopographyElevationField] = useState('')
+  const [topographyEpsg, setTopographyEpsg] = useState('')
+  const [topographyImporting, setTopographyImporting] = useState(false)
+  const [topographyImportInfo, setTopographyImportInfo] = useState(null)
   const [searchText, setSearchText] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
@@ -499,6 +505,66 @@ function App() {
       alert('No fue posible calcular el mapa. Revisa que el backend FastAPI esté disponible.')
     } finally {
       setCalculating(false)
+    }
+  }
+
+  const importTopography = async () => {
+    if (!topographyFile) return
+
+    setTopographyImporting(true)
+    setTopographyImportInfo(null)
+
+    try {
+      const form = new FormData()
+      form.append('file', topographyFile)
+      if (topographyElevationField.trim()) {
+        form.append('elevation_field', topographyElevationField.trim())
+      }
+      if (topographyEpsg.trim()) {
+        form.append('source_epsg', topographyEpsg.trim())
+      }
+
+      const response = await fetch(`${API_BASE}/api/topography/import`, {
+        method: 'POST',
+        body: form
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.detail || `HTTP ${response.status}`)
+      }
+
+      const imported = (data.contours || []).map((item, index) => ({
+        id: crypto.randomUUID(),
+        name: item.name || `Curva importada ${contours.length + index + 1}`,
+        elevation_m: Number(item.elevation_m || 0),
+        points: item.points || []
+      }))
+
+      setContours(prev => [...prev, ...imported])
+      setTopographyImportInfo(data)
+
+      if (data.bounds?.length === 2) {
+        const south = Number(data.bounds[0][0])
+        const west = Number(data.bounds[0][1])
+        const north = Number(data.bounds[1][0])
+        const east = Number(data.bounds[1][1])
+        mapRef.current?.fitBounds(
+          [[west, south], [east, north]],
+          { padding: 90, duration: 900 }
+        )
+      }
+
+      if (imported[0]) {
+        setSelected({ type: 'contour', id: imported[0].id })
+      }
+    } catch (error) {
+      console.error(error)
+      setTopographyImportInfo({
+        error: error.message || 'No fue posible importar la topografía.'
+      })
+    } finally {
+      setTopographyImporting(false)
     }
   }
 
@@ -971,6 +1037,18 @@ function App() {
             setContourDraft([])
             setMode('contour')
           }} />
+          <IconButton
+            active={topographyImportOpen}
+            title="Importar curvas de nivel desde Shapefile ZIP, GeoJSON o DXF"
+            icon="⇧"
+            label="Importar topo"
+            onClick={() => {
+              setTopographyImportOpen(v => !v)
+              setSearchOpen(false)
+              setSettingsOpen(false)
+              setLayersOpen(false)
+            }}
+          />
           <IconButton active={mode === 'area'} title="Dibujar área de cálculo" icon="▱" label="Área" onClick={() => {
             setDraftPolygon([])
             setMode('area')
@@ -1046,6 +1124,7 @@ function App() {
             setSearchOpen(v => !v)
             setSettingsOpen(false)
             setLayersOpen(false)
+            setTopographyImportOpen(false)
           }}
         >
           <span>⌕</span><small>Buscar</small>
@@ -1058,6 +1137,7 @@ function App() {
             setLayersOpen(v => !v)
             setSearchOpen(false)
             setSettingsOpen(false)
+            setTopographyImportOpen(false)
           }}
         >
           <span>☷</span><small>Capas</small>
@@ -1078,6 +1158,7 @@ function App() {
             setSettingsOpen(v => !v)
             setSearchOpen(false)
             setLayersOpen(false)
+            setTopographyImportOpen(false)
           }}
         >
           <span>⚙</span><small>General</small>
@@ -1115,6 +1196,90 @@ function App() {
         </div>
       )}
 
+
+      {topographyImportOpen && (
+        <div className="floating-dialog topo-import-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">TOPOGRAFÍA</span>
+              <h3>Importar curvas de nivel</h3>
+            </div>
+            <button onClick={() => setTopographyImportOpen(false)}>×</button>
+          </div>
+
+          <div className="topo-format-note">
+            Formatos: <b>ZIP Shapefile</b>, <b>GeoJSON</b> y <b>DXF</b>.
+          </div>
+
+          <label className="topo-file-field">
+            Archivo
+            <input
+              type="file"
+              accept=".zip,.geojson,.json,.dxf"
+              onChange={e => {
+                setTopographyFile(e.target.files?.[0] || null)
+                setTopographyImportInfo(null)
+              }}
+            />
+          </label>
+
+          <div className="topo-import-grid">
+            <label>
+              Campo de cota
+              <input
+                type="text"
+                value={topographyElevationField}
+                onChange={e => setTopographyElevationField(e.target.value)}
+                placeholder="Auto (COTA, ELEV, Z...)"
+              />
+            </label>
+            <label>
+              EPSG de origen
+              <input
+                type="number"
+                value={topographyEpsg}
+                onChange={e => setTopographyEpsg(e.target.value)}
+                placeholder="Ej. 32719"
+              />
+            </label>
+          </div>
+
+          <div className="topo-help">
+            Para Shapefile, sube un ZIP con .shp, .shx, .dbf y preferentemente .prj.
+            El EPSG normalmente solo es necesario si falta el .prj o si el DXF usa coordenadas proyectadas.
+          </div>
+
+          <button
+            type="button"
+            className="topo-import-button"
+            onClick={importTopography}
+            disabled={!topographyFile || topographyImporting}
+          >
+            {topographyImporting ? 'Importando…' : 'Importar topografía'}
+          </button>
+
+          {topographyImportInfo?.error && (
+            <div className="topo-import-result error">
+              {topographyImportInfo.error}
+            </div>
+          )}
+
+          {topographyImportInfo && !topographyImportInfo.error && (
+            <div className="topo-import-result success">
+              <strong>{topographyImportInfo.count} curvas importadas</strong>
+              <span>
+                {topographyImportInfo.source_type}
+                {topographyImportInfo.elevation_field
+                  ? ` · cota: ${topographyImportInfo.elevation_field}`
+                  : ''}
+              </span>
+              {(topographyImportInfo.warnings || []).map((warning, index) => (
+                <small key={index}>{warning}</small>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {searchOpen && (
         <div className="floating-dialog search-dialog">
