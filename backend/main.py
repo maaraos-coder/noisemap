@@ -22,10 +22,220 @@ from noise_app.engine import (
     Barrier,
     PropagationSettings,
     Source,
+    atmospheric_absorption_iso9613_db_per_m,
+    energetic_sum_db,
     level_at_point,
     point_in_polygon,
 )
 
+
+
+
+OCTAVE_BANDS = (63, 125, 250, 500, 1000, 2000, 4000, 8000)
+A_WEIGHTING_DB = {
+    63: -26.2,
+    125: -16.1,
+    250: -8.6,
+    500: -3.2,
+    1000: 0.0,
+    2000: 1.2,
+    4000: 1.0,
+    8000: -1.1,
+}
+
+
+def _source_adjustment_db(source) -> float:
+    duty = max(float(source.time_active_pct), 0.001) / 100.0
+    return float(source.adjust_db) + 10.0 * math.log10(duty)
+
+
+def _source_band_level(source, band_hz: int) -> Optional[float]:
+    levels = source.octave_levels or {}
+    for key in (str(band_hz), band_hz):
+        if key in levels:
+            try:
+                return float(levels[key])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _settings_for_band(base, band_hz: float) -> PropagationSettings:
+    alpha_db_per_km = (
+        atmospheric_absorption_iso9613_db_per_m(
+            band_hz,
+            temperature_c=base.temperature_c,
+            humidity_pct=base.humidity_pct,
+        )
+        * 1000.0
+    )
+    return PropagationSettings(
+        alpha_db_per_km=alpha_db_per_km,
+        frequency_hz=float(band_hz),
+        max_barrier_db=base.max_barrier_db,
+        temperature_c=base.temperature_c,
+        humidity_pct=base.humidity_pct,
+    )
+
+
+def _source_spectral_result(
+    source_input,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_height_m: float,
+    barriers,
+    base_settings,
+    lat0: float,
+    lon0: float,
+):
+    adjustment = _source_adjustment_db(source_input)
+    mode = (source_input.spectrum_mode or "broadband").lower()
+
+    if mode == "octaves":
+        bands_db = {}
+        weighted_levels = []
+        for band in OCTAVE_BANDS:
+            lw = _source_band_level(source_input, band)
+            if lw is None:
+                bands_db[str(band)] = None
+                continue
+
+            source_model = Source(
+                name=source_input.name,
+                lat=source_input.lat,
+                lon=source_input.lon,
+                height_m=source_input.height_m,
+                lw_db=lw + adjustment,
+                dc_db=source_input.dc_db,
+                enabled=source_input.enabled,
+            )
+            band_settings = _settings_for_band(base_settings, band)
+            lp = level_at_point(
+                [source_model],
+                receiver_lat,
+                receiver_lon,
+                receiver_height_m,
+                barriers,
+                band_settings,
+                lat0,
+                lon0,
+            )
+            if np.isfinite(lp):
+                bands_db[str(band)] = round(float(lp), 3)
+                weighted_levels.append(
+                    float(lp) + (A_WEIGHTING_DB[band] if base_settings.a_weighting else 0.0)
+                )
+            else:
+                bands_db[str(band)] = None
+
+        total = energetic_sum_db(weighted_levels)
+        return {
+            "total_db": float(total) if np.isfinite(total) else None,
+            "bands_db": bands_db,
+            "mode": "octaves",
+        }
+
+    if mode == "single":
+        frequency = max(float(source_input.single_frequency_hz), 1.0)
+        source_model = Source(
+            name=source_input.name,
+            lat=source_input.lat,
+            lon=source_input.lon,
+            height_m=source_input.height_m,
+            lw_db=float(source_input.lw_db) + adjustment,
+            dc_db=source_input.dc_db,
+            enabled=source_input.enabled,
+        )
+        band_settings = _settings_for_band(base_settings, frequency)
+        lp = level_at_point(
+            [source_model],
+            receiver_lat,
+            receiver_lon,
+            receiver_height_m,
+            barriers,
+            band_settings,
+            lat0,
+            lon0,
+        )
+        nearest_band = min(OCTAVE_BANDS, key=lambda b: abs(b - frequency))
+        if np.isfinite(lp):
+            total = float(lp) + (
+                A_WEIGHTING_DB[nearest_band] if base_settings.a_weighting else 0.0
+            )
+        else:
+            total = None
+        return {
+            "total_db": total,
+            "bands_db": {
+                str(b): (round(float(lp), 3) if b == nearest_band and np.isfinite(lp) else None)
+                for b in OCTAVE_BANDS
+            },
+            "mode": "single",
+            "frequency_hz": frequency,
+        }
+
+    # Broadband is entered as LwA in the current UI. It is propagated as a
+    # broadband A-weighted quantity, so no artificial octave spectrum is invented.
+    source_model = Source(
+        name=source_input.name,
+        lat=source_input.lat,
+        lon=source_input.lon,
+        height_m=source_input.height_m,
+        lw_db=float(source_input.lw_db) + adjustment,
+        dc_db=source_input.dc_db,
+        enabled=source_input.enabled,
+    )
+    broadband_settings = PropagationSettings(
+        alpha_db_per_km=base_settings.alpha_db_per_km,
+        frequency_hz=base_settings.frequency_hz,
+        max_barrier_db=base_settings.max_barrier_db,
+        temperature_c=base_settings.temperature_c,
+        humidity_pct=base_settings.humidity_pct,
+    )
+    lp = level_at_point(
+        [source_model],
+        receiver_lat,
+        receiver_lon,
+        receiver_height_m,
+        barriers,
+        broadband_settings,
+        lat0,
+        lon0,
+    )
+    return {
+        "total_db": float(lp) if np.isfinite(lp) else None,
+        "bands_db": {str(b): None for b in OCTAVE_BANDS},
+        "mode": "broadband",
+    }
+
+
+def _combined_spectral_level_at_point(
+    source_inputs,
+    receiver_lat,
+    receiver_lon,
+    receiver_height_m,
+    barriers,
+    base_settings,
+    lat0,
+    lon0,
+):
+    totals = []
+    for source_input in source_inputs:
+        if not source_input.enabled:
+            continue
+        result = _source_spectral_result(
+            source_input,
+            receiver_lat,
+            receiver_lon,
+            receiver_height_m,
+            barriers,
+            base_settings,
+            lat0,
+            lon0,
+        )
+        if result["total_db"] is not None and np.isfinite(result["total_db"]):
+            totals.append(result["total_db"])
+    return energetic_sum_db(totals)
 
 
 ELEVATION_FIELD_CANDIDATES = (
@@ -279,7 +489,7 @@ def _dxf_lines(
 
 app = FastAPI(
     title="Noise Map Lab API",
-    version="3.0.0",
+    version="4.0.0",
     description="Motor acústico educativo para la interfaz React + MapLibre.",
 )
 
@@ -364,7 +574,7 @@ class CalculationResponse(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "3.0.0"}
+    return {"status": "ok", "version": "4.0.0"}
 
 
 
@@ -489,19 +699,6 @@ def calculate(payload: CalculationRequest):
     lat_values = np.linspace(south, north, n)
     lon_values = np.linspace(west, east, n)
 
-    sources = [
-        Source(
-            name=s.name,
-            lat=s.lat,
-            lon=s.lon,
-            height_m=s.height_m,
-            lw_db=s.lw_db + s.adjust_db + (10.0 * np.log10(max(s.time_active_pct, 0.001) / 100.0)),
-            dc_db=s.dc_db,
-            enabled=s.enabled,
-        )
-        for s in payload.sources
-    ]
-
     barriers = [
         Barrier(
             name=b.name,
@@ -519,7 +716,10 @@ def calculate(payload: CalculationRequest):
         alpha_db_per_km=payload.settings.alpha_db_per_km,
         frequency_hz=payload.settings.frequency_hz,
         max_barrier_db=payload.settings.max_barrier_db,
+        temperature_c=payload.settings.temperature_c,
+        humidity_pct=payload.settings.humidity_pct,
     )
+    settings.a_weighting = payload.settings.a_weighting
 
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
@@ -538,8 +738,8 @@ def calculate(payload: CalculationRequest):
                 row.append(None)
                 continue
 
-            level = level_at_point(
-                sources,
+            level = _combined_spectral_level_at_point(
+                payload.sources,
                 lat_f,
                 lon_f,
                 payload.settings.receiver_height_m,
@@ -560,22 +760,16 @@ def calculate(payload: CalculationRequest):
 
     receiver_results = []
     for receiver in payload.receivers:
-        level = level_at_point(
-            sources,
-            receiver.lat,
-            receiver.lon,
-            receiver.height_m,
-            barriers,
-            settings,
-            lat0,
-            lon0,
-        )
         contributions = []
-        for source_model, source_input in zip(sources, payload.sources):
-            if not source_model.enabled:
+        all_source_totals = []
+        combined_band_levels = {str(b): [] for b in OCTAVE_BANDS}
+
+        for source_input in payload.sources:
+            if not source_input.enabled:
                 continue
-            source_level = level_at_point(
-                [source_model],
+
+            source_result = _source_spectral_result(
+                source_input,
                 receiver.lat,
                 receiver.lon,
                 receiver.height_m,
@@ -584,17 +778,41 @@ def calculate(payload: CalculationRequest):
                 lat0,
                 lon0,
             )
+
+            source_total = source_result.get("total_db")
+            if source_total is not None and np.isfinite(source_total):
+                all_source_totals.append(float(source_total))
+
+            for band in OCTAVE_BANDS:
+                band_value = source_result["bands_db"].get(str(band))
+                if band_value is not None and np.isfinite(band_value):
+                    combined_band_levels[str(band)].append(float(band_value))
+
             contributions.append({
                 "source_id": source_input.id,
                 "source_name": source_input.name,
-                "level_db": round(float(source_level), 2) if np.isfinite(source_level) else None,
+                "mode": source_result.get("mode"),
+                "level_db": round(float(source_total), 2)
+                    if source_total is not None and np.isfinite(source_total)
+                    else None,
+                "bands_db": source_result.get("bands_db", {}),
             })
+
+        total_level = energetic_sum_db(all_source_totals)
+        receiver_bands = {}
+        for band in OCTAVE_BANDS:
+            values = combined_band_levels[str(band)]
+            band_total = energetic_sum_db(values)
+            receiver_bands[str(band)] = (
+                round(float(band_total), 2) if values and np.isfinite(band_total) else None
+            )
 
         receiver_results.append({
             "id": receiver.id,
             "name": receiver.name,
             "height_m": receiver.height_m,
-            "level_db": round(float(level), 2) if np.isfinite(level) else None,
+            "level_db": round(float(total_level), 2) if np.isfinite(total_level) else None,
+            "bands_db": receiver_bands,
             "contributions": contributions,
         })
 
