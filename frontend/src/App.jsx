@@ -1690,7 +1690,7 @@ function App() {
         mapStyle={OSM_STYLE}
         onClick={onMapClick}
         onMouseMove={onMapMouseMove}
-        onZoomEnd={event => setMapZoom(event.viewState.zoom)}
+        onMove={event => setMapZoom(Number(event.viewState?.zoom ?? event.target?.getZoom?.() ?? mapZoom))}
         cursor={mode === 'navigate' ? 'grab' : mode === 'edit-area' ? 'default' : 'crosshair'}
         doubleClickZoom={mode !== 'area'}
       >
@@ -1998,12 +1998,12 @@ function App() {
               }}
             >
               <div
-                className={`building-label ${mapZoom < 17 ? 'compact' : ''} ${mapZoom < 15.5 ? 'dot-only' : ''}`}
+                className={`building-label ${mapZoom < 17.5 ? 'compact' : ''} ${mapZoom < 16.5 ? 'dot-only' : ''}`}
                 title={`${building.name} · ${Number(building.height_m).toFixed(1)} m`}
               >
-                {mapZoom < 15.5 ? (
+                {mapZoom < 16.5 ? (
                   <span className="building-label-dot">E</span>
-                ) : mapZoom < 17 ? (
+                ) : mapZoom < 17.5 ? (
                   <strong>{building.name}</strong>
                 ) : (
                   <>
