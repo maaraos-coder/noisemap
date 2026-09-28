@@ -1394,3 +1394,31 @@ select {
   font-weight: 750;
   letter-spacing: .01em;
 }
+
+
+.scale-section {
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid #e1e7ed;
+}
+
+.scale-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #53606c;
+  font-size: .76rem;
+  font-weight: 800;
+}
+
+.scale-section-title span {
+  color: #0b3768;
+  font-size: .72rem;
+}
+
+.scale-help {
+  margin-top: 6px;
+  color: #7b8793;
+  font-size: .63rem;
+  line-height: 1.3;
+}
