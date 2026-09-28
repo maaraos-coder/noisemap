@@ -364,7 +364,7 @@ function App() {
       } else {
         const item = {
           id: crypto.randomUUID(),
-          name: `Línea auxiliar ${accessories.length + 1}`,
+          name: `Auxiliar gráfico ${accessories.length + 1}`,
           kind: 'measurement',
           lat_a: lineStart[0],
           lon_a: lineStart[1],
@@ -769,12 +769,22 @@ function App() {
           <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente" onClick={() => setMode('source')} />
           <IconButton active={mode === 'receiver'} title="Agregar receptor" icon="⌖" label="Receptor" onClick={() => setMode('receiver')} />
           <IconButton active={mode === 'barrier'} title="Dibujar barrera" icon="▰" label="Barrera" onClick={() => setMode('barrier')} />
-          <IconButton active={mode === 'line'} title="Agregar línea auxiliar" icon="⌇" label="Línea" onClick={() => setMode('line')} />
+          <IconButton active={mode === 'line'} title="Auxiliar gráfico: solo dibujo, no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => setMode('line')} />
           <IconButton active={mode === 'area'} title="Dibujar área de cálculo" icon="▱" label="Área" onClick={() => {
             setDraftPolygon([])
             setMode('area')
           }} />
           <IconButton active={mode === 'edit-area'} title="Editar área de cálculo" icon="◇" label="Editar" onClick={() => setMode('edit-area')} />
+          <button
+            type="button"
+            className={`bottom-calculate ${dirty ? 'dirty' : 'clean'}`}
+            onClick={calculate}
+            disabled={calculating}
+            title="Calcular o actualizar el mapa de ruido"
+          >
+            <span className="calc-icon">▶</span>
+            <span>{calculating ? 'Calculando…' : dirty ? 'Calcular mapa' : 'Mapa actualizado'}</span>
+          </button>
         </div>
 
         {mode === 'area' && draftPolygon.length >= 3 && (
@@ -1093,7 +1103,13 @@ function App() {
 
       <div className="noise-legend">
         <div className="legend-title">{globalSettings.a_weighting ? 'dB(A)' : 'dB'}</div>
-        <div className="legend-scale" style={{ height: `${Math.max(250, legendTicks.length * 30)}px` }}>
+        <div
+          className="legend-scale"
+          style={{
+            height: `${Math.max(205, legendTicks.length * 21)}px`,
+            '--legend-steps': Math.max(1, legendTicks.length - 1)
+          }}
+        >
           <div className="legend-gradient" />
           <div className="legend-labels">
             {legendTicks.map(v => <span key={v}>{v}</span>)}
@@ -1292,7 +1308,7 @@ function App() {
       )}
 
       {mode === 'line' && lineStart && (
-        <div className="status-pill">Selecciona el segundo extremo de la línea auxiliar</div>
+        <div className="status-pill">Auxiliar gráfico · selecciona el segundo extremo · no afecta el cálculo acústico</div>
       )}
 
       {mode === 'area' && (
