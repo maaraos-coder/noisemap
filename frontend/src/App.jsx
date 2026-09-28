@@ -1092,14 +1092,16 @@ function App() {
       </aside>
 
       <div className="noise-legend">
-        <div className="legend-title">dB</div>
+        <div className="legend-title">{globalSettings.a_weighting ? 'dB(A)' : 'dB'}</div>
         <div className="legend-scale" style={{ height: `${Math.max(250, legendTicks.length * 30)}px` }}>
           <div className="legend-gradient" />
           <div className="legend-labels">
             {legendTicks.map(v => <span key={v}>{v}</span>)}
           </div>
         </div>
-        <div className="legend-note">Nivel calculado</div>
+        <div className="legend-note">
+          Nivel calculado · {globalSettings.a_weighting ? 'ponderación A' : 'sin ponderación A'}
+        </div>
       </div>
 
       {selectedObject && (
