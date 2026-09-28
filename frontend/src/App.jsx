@@ -1527,6 +1527,24 @@ function App() {
           </Source>
         )}
 
+        {mode === 'area' && draftPolygon.map(([lat, lon], index) => (
+          <Marker
+            key={`draft-area-vertex-${index}`}
+            longitude={lon}
+            latitude={lat}
+            anchor="center"
+            onClick={e => e.originalEvent.stopPropagation()}
+          >
+            <div
+              className={`area-draft-vertex ${index === 0 ? 'first' : ''}`}
+              title={index === 0 ? 'Inicio del área de cálculo' : `Vértice ${index + 1}`}
+            >
+              <span>{index + 1}</span>
+              {index === 0 && <b>INICIO</b>}
+            </div>
+          </Marker>
+        ))}
+
         {mode === 'barrier' && barrierStart && barrierHover && (
           <Source id="barrier-preview" type="geojson" data={barrierPreviewData}>
             <Layer
@@ -1957,6 +1975,19 @@ function App() {
         </div>
 
       </div>
+
+      {mode === 'area' && (
+        <div className="area-drawing-guide">
+          <strong>Área de cálculo</strong>
+          <span>
+            {draftPolygon.length === 0
+              ? 'Haz clic en el mapa para definir el primer vértice.'
+              : draftPolygon.length < 3
+                ? `Vértice ${draftPolygon.length} definido · agrega al menos ${3 - draftPolygon.length} más.`
+                : `${draftPolygon.length} vértices definidos · pulsa “Cerrar área” cuando termines.`}
+          </span>
+        </div>
+      )}
 
       <div className="utility-toolbar">
         <button
