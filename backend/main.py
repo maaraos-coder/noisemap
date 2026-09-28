@@ -990,15 +990,19 @@ def geocode(q: str):
 
 @app.post("/api/receiver-preview")
 def receiver_preview(payload: ReceiverPreviewRequest):
-    if not payload.sources:
+    all_sources = _expand_sources(
+        payload.sources, payload.roads, payload.settings.temperature_c
+    )
+    if not all_sources:
         return {
             "level_db": None,
             "bands_db": {str(b): None for b in OCTAVE_BANDS},
             "contributions": [],
+            "diagnostics": [],
         }
 
-    lats = [payload.receiver.lat] + [s.lat for s in payload.sources]
-    lons = [payload.receiver.lon] + [s.lon for s in payload.sources]
+    lats = [payload.receiver.lat] + [s.lat for s in all_sources]
+    lons = [payload.receiver.lon] + [s.lon for s in all_sources]
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
@@ -1007,7 +1011,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     )
     source_ground_elevations = {
         source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
-        for source in payload.sources
+        for source in all_sources
     }
 
     barriers = [
@@ -1042,13 +1046,12 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     )
     settings.a_weighting = payload.settings.a_weighting
 
-    contributions = []
     totals = []
     band_values = {str(b): [] for b in OCTAVE_BANDS}
-
     diagnostics = []
+    contribution_items = []
 
-    for source in payload.sources:
+    for source in all_sources:
         if not source.enabled:
             continue
 
@@ -1065,46 +1068,47 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             receiver_ground_elevation_m=receiver_ground_elevation_m,
             source_ground_elevation_m=source_ground_elevations.get(source.id),
         )
+        contribution_items.append((source, result))
 
-        # Explicit 3D geometry diagnostic using the same propagation engine.
-        diagnostic_source = Source(
-            name=source.name,
-            lat=source.lat,
-            lon=source.lon,
-            height_m=source.height_m,
-            lw_db=float(source.lw_db),
-            dc_db=source.dc_db,
-            enabled=source.enabled,
-            ground_elevation_m=source_ground_elevations.get(source.id, 0.0),
-        )
-        diag = source_to_point_breakdown(
-            diagnostic_source,
-            payload.receiver.lat,
-            payload.receiver.lon,
-            payload.receiver.height_m,
-            barriers,
-            settings,
-            lat0,
-            lon0,
-            receiver_ground_elevation_m=receiver_ground_elevation_m,
-        )
-        diagnostics.append({
-            "source_id": source.id,
-            "source_name": source.name,
-            "distance_3d_m": round(float(diag["distance_m"]), 3),
-            "a_div_db": round(float(diag["a_div_db"]), 3),
-            "a_atm_db": round(float(diag["a_atm_db"]), 3),
-            "a_gr_db": round(float(diag["a_gr_db"]), 3),
-            "a_bar_db": round(float(diag["a_bar_db"]), 3),
-            "lp_direct_db": round(float(diag["lp_direct_db"]), 3),
-            "lp_reflected_db": (
-                round(float(diag["lp_reflected_db"]), 3)
-                if np.isfinite(diag["lp_reflected_db"]) else None
-            ),
-            "reflection_count": int(diag["reflection_count"]),
-            "source_ground_elevation_m": round(float(diag["source_ground_elevation_m"]), 3),
-            "receiver_ground_elevation_m": round(float(diag["receiver_ground_elevation_m"]), 3),
-        })
+        if source.source_kind != "road":
+            diagnostic_source = Source(
+                name=source.name,
+                lat=source.lat,
+                lon=source.lon,
+                height_m=source.height_m,
+                lw_db=float(source.lw_db),
+                dc_db=source.dc_db,
+                enabled=source.enabled,
+                ground_elevation_m=source_ground_elevations.get(source.id, 0.0),
+            )
+            diag = source_to_point_breakdown(
+                diagnostic_source,
+                payload.receiver.lat,
+                payload.receiver.lon,
+                payload.receiver.height_m,
+                barriers,
+                settings,
+                lat0,
+                lon0,
+                receiver_ground_elevation_m=receiver_ground_elevation_m,
+            )
+            diagnostics.append({
+                "source_id": source.id,
+                "source_name": source.name,
+                "distance_3d_m": round(float(diag["distance_m"]), 3),
+                "a_div_db": round(float(diag["a_div_db"]), 3),
+                "a_atm_db": round(float(diag["a_atm_db"]), 3),
+                "a_gr_db": round(float(diag["a_gr_db"]), 3),
+                "a_bar_db": round(float(diag["a_bar_db"]), 3),
+                "lp_direct_db": round(float(diag["lp_direct_db"]), 3),
+                "lp_reflected_db": (
+                    round(float(diag["lp_reflected_db"]), 3)
+                    if np.isfinite(diag["lp_reflected_db"]) else None
+                ),
+                "reflection_count": int(diag["reflection_count"]),
+                "source_ground_elevation_m": round(float(diag["source_ground_elevation_m"]), 3),
+                "receiver_ground_elevation_m": round(float(diag["receiver_ground_elevation_m"]), 3),
+            })
 
         total = result.get("total_db")
         if total is not None and np.isfinite(total):
@@ -1114,15 +1118,6 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             value = result.get("bands_db", {}).get(str(band))
             if value is not None and np.isfinite(value):
                 band_values[str(band)].append(float(value))
-
-        contributions.append({
-            "source_id": source.id,
-            "source_name": source.name,
-            "level_db": round(float(total), 3)
-                if total is not None and np.isfinite(total)
-                else None,
-            "bands_db": result.get("bands_db", {}),
-        })
 
     total_level = energetic_sum_db(totals)
     bands_db = {}
@@ -1134,7 +1129,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     return {
         "level_db": round(float(total_level), 3) if np.isfinite(total_level) else None,
         "bands_db": bands_db,
-        "contributions": contributions,
+        "contributions": _aggregate_contributions(contribution_items),
         "diagnostics": diagnostics,
         "receiver_height_m": payload.receiver.height_m,
         "receiver_ground_elevation_m": round(float(receiver_ground_elevation_m), 3),
