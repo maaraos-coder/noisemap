@@ -2330,3 +2330,55 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Editable heights inside barrier profile */
+.profile-height-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.profile-height-controls > label {
+  padding: 8px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #536170;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.profile-height-controls > label > div {
+  display: grid;
+  grid-template-columns: 1fr 58px 14px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.profile-height-controls input[type="range"] {
+  width: 100%;
+}
+
+.profile-height-controls input[type="number"] {
+  width: 58px;
+  padding: 5px 4px;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+  background: #fff;
+  text-align: center;
+  font-size: 10px;
+}
+
+.profile-height-controls span {
+  color: #6b7783;
+  font-size: 9px;
+}
+
+@media (max-width: 900px) {
+  .profile-height-controls {
+    grid-template-columns: 1fr;
+  }
+}
