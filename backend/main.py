@@ -62,6 +62,16 @@ class BarrierIn(BaseModel):
     reflection_percent: float = 0.0
 
 
+class ReceiverIn(BaseModel):
+    id: str
+    name: str
+    lat: float
+    lon: float
+    height_m: float = 1.5
+    visible: bool = True
+    height_mode: str = "map"
+
+
 class GridSettings(BaseModel):
     resolution: int = Field(default=48, ge=18, le=100)
     receiver_height_m: float = Field(default=1.5, gt=0.0, le=50.0)
@@ -80,6 +90,7 @@ class GridSettings(BaseModel):
 
 class CalculationRequest(BaseModel):
     sources: List[SourceIn]
+    receivers: List[ReceiverIn] = []
     barriers: List[BarrierIn] = []
     polygon: List[List[float]]
     settings: GridSettings = GridSettings()
@@ -90,6 +101,7 @@ class CalculationResponse(BaseModel):
     levels: List[List[Optional[float]]]
     min_level: Optional[float]
     max_level: Optional[float]
+    receiver_results: List[dict] = []
 
 
 @app.get("/api/health")
@@ -146,6 +158,7 @@ def calculate(payload: CalculationRequest):
             levels=[],
             min_level=None,
             max_level=None,
+            receiver_results=[],
         )
 
     lats = [p[0] for p in polygon]
@@ -226,9 +239,29 @@ def calculate(payload: CalculationRequest):
 
         matrix.append(row)
 
+    receiver_results = []
+    for receiver in payload.receivers:
+        level = level_at_point(
+            sources,
+            receiver.lat,
+            receiver.lon,
+            receiver.height_m,
+            barriers,
+            settings,
+            lat0,
+            lon0,
+        )
+        receiver_results.append({
+            "id": receiver.id,
+            "name": receiver.name,
+            "height_m": receiver.height_m,
+            "level_db": round(float(level), 2) if np.isfinite(level) else None,
+        })
+
     return CalculationResponse(
         bounds=[[south, west], [north, east]],
         levels=matrix,
         min_level=min(finite) if finite else None,
         max_level=max(finite) if finite else None,
+        receiver_results=receiver_results,
     )
