@@ -807,6 +807,67 @@ select {
   cursor: pointer;
 }
 
+.location-intro {
+  margin: -2px 0 10px;
+  color: #5d6b79;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.location-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.location-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  background: #f7faff;
+  color: #194b7d;
+  cursor: pointer;
+}
+
+.location-actions button:hover {
+  background: #edf5ff;
+  border-color: #b9d0e7;
+}
+
+.location-actions span {
+  font-size: 15px;
+}
+
+.location-actions strong {
+  font-size: 10px;
+}
+
+.location-message {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #f4f7fa;
+  color: #687786;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+@media (max-width: 620px) {
+  .search-dialog {
+    top: 136px;
+    width: calc(100vw - 20px);
+  }
+
+  .location-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .search-results {
   display: grid;
   gap: 5px;
