@@ -21,38 +21,9 @@ const OSM_STYLE = {
   layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
 }
 
-const initialSources = [{
-  id: crypto.randomUUID(),
-  name: 'Fuente 1',
-  lat: -33.45670,
-  lon: -70.64860,
-  height_m: 1.5,
-  lw_db: 100,
-  dc_db: 0,
-  enabled: true,
-  spectrum_mode: 'broadband',
-  single_frequency_hz: 500,
-  octave_levels: {63: 92, 125: 95, 250: 98, 500: 100, 1000: 98, 2000: 94, 4000: 90, 8000: 84},
-  adjust_db: 0,
-  time_active_pct: 100
-}]
-
-const initialReceivers = [{
-  id: crypto.randomUUID(),
-  name: 'Receptor 1',
-  lat: -33.45695,
-  lon: -70.64790,
-  height_m: 1.5,
-  visible: true,
-  height_mode: 'map'
-}]
-
-const defaultPolygon = [
-  [-33.4580, -70.6502],
-  [-33.4580, -70.6468],
-  [-33.4557, -70.6468],
-  [-33.4557, -70.6502]
-]
+const initialSources = []
+const initialReceivers = []
+const defaultPolygon = []
 
 function polygonGeoJSON(points) {
   if (!points || points.length < 3) {
@@ -400,7 +371,7 @@ function App() {
   const [barrierHover, setBarrierHover] = useState(null)
   const [lineStart, setLineStart] = useState(null)
   const [rayMode, setRayMode] = useState('off')
-  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topographyImportOpen, setTopographyImportOpen] = useState(false)
   const [topographyFile, setTopographyFile] = useState(null)
@@ -411,6 +382,7 @@ function App() {
   const [searchText, setSearchText] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
+  const [locationMessage, setLocationMessage] = useState('Busca una dirección, pega coordenadas GPS o usa tu ubicación actual.')
   const [globalSettings, setGlobalSettings] = useState({
     prediction_model: 'ISO 9613-2:2024',
     a_weighting: true,
@@ -635,6 +607,13 @@ function App() {
       saved_at: new Date().toISOString(),
       app_engine: 'V4 spectral',
       data: {
+        camera: mapRef.current ? {
+          longitude: mapRef.current.getCenter().lng,
+          latitude: mapRef.current.getCenter().lat,
+          zoom: mapRef.current.getZoom(),
+          bearing: mapRef.current.getBearing(),
+          pitch: mapRef.current.getPitch()
+        } : null,
         sources,
         receivers,
         barriers,
@@ -718,7 +697,18 @@ function App() {
           : 'Proyecto cargado correctamente.'
       )
 
-      if (data.polygon.length >= 3) {
+      if (
+        data.camera &&
+        Number.isFinite(Number(data.camera.longitude)) &&
+        Number.isFinite(Number(data.camera.latitude))
+      ) {
+        mapRef.current?.jumpTo({
+          center: [Number(data.camera.longitude), Number(data.camera.latitude)],
+          zoom: Number.isFinite(Number(data.camera.zoom)) ? Number(data.camera.zoom) : 16,
+          bearing: Number.isFinite(Number(data.camera.bearing)) ? Number(data.camera.bearing) : 0,
+          pitch: Number.isFinite(Number(data.camera.pitch)) ? Number(data.camera.pitch) : 0
+        })
+      } else if (data.polygon.length >= 3) {
         const lats = data.polygon.map(p => Number(p[0])).filter(Number.isFinite)
         const lons = data.polygon.map(p => Number(p[1])).filter(Number.isFinite)
         if (lats.length && lons.length) {
@@ -987,34 +977,123 @@ function App() {
   }
 
 
+  const goToLocation = (latValue, lonValue, zoom = 18, closeDialog = false) => {
+    const lat = Number(latValue)
+    const lon = Number(lonValue)
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      setLocationMessage('Las coordenadas ingresadas no son válidas.')
+      return
+    }
+
+    mapRef.current?.flyTo({
+      center: [lon, lat],
+      zoom,
+      duration: 900,
+      essential: true
+    })
+    setLocationMessage(`Ubicación seleccionada: ${lat.toFixed(6)}, ${lon.toFixed(6)}`)
+    if (closeDialog) setSearchOpen(false)
+  }
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationMessage('Este navegador no permite obtener la ubicación actual.')
+      return
+    }
+
+    setLocationMessage('Obteniendo ubicación…')
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        const { latitude, longitude } = position.coords
+        goToLocation(latitude, longitude, 18, true)
+      },
+      error => {
+        console.error(error)
+        setLocationMessage(
+          error.code === 1
+            ? 'No se autorizó el acceso a la ubicación. Puedes buscar una dirección o pegar coordenadas GPS.'
+            : 'No fue posible obtener la ubicación. Puedes buscar una dirección o pegar coordenadas GPS.'
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    )
+  }
+
+  const fitProject = () => {
+    const points = []
+
+    sources.forEach(item => points.push([Number(item.lon), Number(item.lat)]))
+    receivers.forEach(item => points.push([Number(item.lon), Number(item.lat)]))
+    barriers.forEach(item => {
+      points.push([Number(item.lon_a), Number(item.lat_a)])
+      points.push([Number(item.lon_b), Number(item.lat_b)])
+    })
+    roads.forEach(item => item.points?.forEach(([lat, lon]) => points.push([Number(lon), Number(lat)])))
+    accessories.forEach(item => {
+      points.push([Number(item.lon_a), Number(item.lat_a)])
+      points.push([Number(item.lon_b), Number(item.lat_b)])
+    })
+    contours.forEach(item => item.points?.forEach(([lat, lon]) => points.push([Number(lon), Number(lat)])))
+    polygon.forEach(([lat, lon]) => points.push([Number(lon), Number(lat)]))
+
+    const valid = points.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat))
+    if (!valid.length) {
+      setLocationMessage('Aún no hay objetos en el proyecto para ajustar la vista.')
+      return
+    }
+
+    if (valid.length === 1) {
+      mapRef.current?.flyTo({ center: valid[0], zoom: 18, duration: 700 })
+      return
+    }
+
+    const lons = valid.map(point => point[0])
+    const lats = valid.map(point => point[1])
+    mapRef.current?.fitBounds(
+      [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      { padding: 90, duration: 900, maxZoom: 18 }
+    )
+  }
+
   const runSearch = async () => {
     const q = searchText.trim()
-    if (!q) return
+    if (!q) {
+      setLocationMessage('Escribe una dirección, lugar o coordenadas.')
+      return
+    }
 
     const coordinateMatch = q.match(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*[,; ]\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)
     if (coordinateMatch) {
       const lat = Number(coordinateMatch[1])
       const lon = Number(coordinateMatch[2])
-      mapRef.current?.flyTo({ center: [lon, lat], zoom: 18 })
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        setLocationMessage('Las coordenadas deben estar entre ±90° de latitud y ±180° de longitud.')
+        return
+      }
       setSearchResults([{ display_name: `Coordenadas ${lat.toFixed(6)}, ${lon.toFixed(6)}`, lat, lon }])
+      goToLocation(lat, lon, 18)
       return
     }
 
     setSearching(true)
+    setLocationMessage('Buscando ubicación…')
     try {
       const response = await fetch(`${API_BASE}/api/geocode?q=${encodeURIComponent(q)}`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
-      setSearchResults(data.results || [])
-      if (data.results?.[0]) {
-        mapRef.current?.flyTo({
-          center: [Number(data.results[0].lon), Number(data.results[0].lat)],
-          zoom: 17
-        })
+      const results = data.results || []
+      setSearchResults(results)
+
+      if (results[0]) {
+        goToLocation(results[0].lat, results[0].lon, 17)
+        setLocationMessage('Selecciona un resultado para comenzar a trabajar en ese lugar.')
+      } else {
+        setLocationMessage('No se encontraron resultados. Prueba una dirección más completa o coordenadas GPS.')
       }
     } catch (error) {
       console.error(error)
       setSearchResults([])
+      setLocationMessage('No fue posible buscar la dirección en este momento.')
     } finally {
       setSearching(false)
     }
@@ -1386,9 +1465,11 @@ function App() {
       <Map
         ref={mapRef}
         initialViewState={{
-          longitude: -70.6484,
-          latitude: -33.45685,
-          zoom: 16.7
+          longitude: 0,
+          latitude: 12,
+          zoom: 1.35,
+          bearing: 0,
+          pitch: 0
         }}
         mapStyle={OSM_STYLE}
         onClick={onMapClick}
@@ -2231,25 +2312,45 @@ function App() {
         <div className="floating-dialog search-dialog">
           <div className="dialog-header">
             <div>
-              <span className="eyebrow">UBICACIÓN</span>
-              <h3>Buscar dirección o coordenadas</h3>
+              <span className="eyebrow">UBICACIÓN DEL PROYECTO</span>
+              <h3>¿Dónde quieres trabajar?</h3>
             </div>
             <button onClick={() => setSearchOpen(false)}>×</button>
           </div>
+
+          <div className="location-intro">
+            Busca cualquier dirección o lugar del mundo, pega coordenadas GPS o usa tu ubicación actual.
+          </div>
+
           <div className="search-row">
             <input
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && runSearch()}
-              placeholder="Dirección, comuna o -33.45, -70.65"
+              placeholder="Ej. Gran Vía 32, Madrid o -33.4489, -70.6693"
+              autoFocus
             />
             <button onClick={runSearch}>{searching ? '…' : 'Buscar'}</button>
           </div>
+
+          <div className="location-actions">
+            <button type="button" onClick={useCurrentLocation}>
+              <span>⌖</span>
+              <strong>Usar mi ubicación</strong>
+            </button>
+            <button type="button" onClick={fitProject}>
+              <span>⛶</span>
+              <strong>Ver proyecto completo</strong>
+            </button>
+          </div>
+
+          <div className="location-message">{locationMessage}</div>
+
           <div className="search-results">
             {searchResults.slice(0, 5).map((item, index) => (
               <button
                 key={index}
-                onClick={() => mapRef.current?.flyTo({ center: [Number(item.lon), Number(item.lat)], zoom: 18 })}
+                onClick={() => goToLocation(item.lat, item.lon, 18, true)}
               >
                 <strong>{item.display_name}</strong>
                 <span>{Number(item.lat).toFixed(6)}, {Number(item.lon).toFixed(6)}</span>
