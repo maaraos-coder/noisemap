@@ -606,6 +606,15 @@ class BarrierIn(BaseModel):
     reflection_percent: float = 0.0
 
 
+class BuildingIn(BaseModel):
+    id: str
+    name: str
+    points: List[List[float]]
+    height_m: float = Field(default=10.0, gt=0.0, le=500.0)
+    enabled: bool = True
+    reflection_percent: float = Field(default=20.0, ge=0.0, le=100.0)
+
+
 class ReceiverIn(BaseModel):
     id: str
     name: str
@@ -644,6 +653,7 @@ class CalculationRequest(BaseModel):
     roads: List[RoadIn] = []
     receivers: List[ReceiverIn] = []
     barriers: List[BarrierIn] = []
+    buildings: List[BuildingIn] = []
     contours: List[ContourIn] = []
     polygon: List[List[float]]
     settings: GridSettings = GridSettings()
@@ -664,6 +674,70 @@ class ReceiverPreviewRequest(BaseModel):
     barriers: List[BarrierIn] = []
     contours: List[ContourIn] = []
     settings: GridSettings = GridSettings()
+
+
+def _barriers_with_buildings(
+    barrier_inputs: List[BarrierIn],
+    buildings: List[BuildingIn],
+    terrain_samples,
+    lat0: float,
+    lon0: float,
+) -> List[Barrier]:
+    result: List[Barrier] = []
+
+    for b in barrier_inputs:
+        ground = _terrain_elevation(
+            terrain_samples,
+            (b.lat_a + b.lat_b) / 2.0,
+            (b.lon_a + b.lon_b) / 2.0,
+            lat0,
+            lon0,
+        )
+        result.append(Barrier(
+            name=b.name,
+            lat_a=b.lat_a,
+            lon_a=b.lon_a,
+            lat_b=b.lat_b,
+            lon_b=b.lon_b,
+            height_m=b.height_m,
+            enabled=b.enabled,
+            reflection_percent=b.reflection_percent,
+            ground_elevation_m=ground,
+        ))
+
+    for building in buildings or []:
+        if not building.enabled or len(building.points) < 3:
+            continue
+
+        pts = [
+            [float(point[0]), float(point[1])]
+            for point in building.points
+            if len(point) >= 2
+        ]
+        if len(pts) < 3:
+            continue
+
+        for edge_index, (a, b) in enumerate(zip(pts, pts[1:] + pts[:1]), start=1):
+            ground = _terrain_elevation(
+                terrain_samples,
+                (a[0] + b[0]) / 2.0,
+                (a[1] + b[1]) / 2.0,
+                lat0,
+                lon0,
+            )
+            result.append(Barrier(
+                name=f"{building.name} · fachada {edge_index}",
+                lat_a=a[0],
+                lon_a=a[1],
+                lat_b=b[0],
+                lon_b=b[1],
+                height_m=building.height_m,
+                enabled=True,
+                reflection_percent=building.reflection_percent,
+                ground_elevation_m=ground,
+            ))
+
+    return result
 
 
 def _build_terrain_samples(contours, lat0: float, lon0: float):
@@ -1070,26 +1144,13 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         for source in all_sources
     }
 
-    barriers = [
-        Barrier(
-            name=b.name,
-            lat_a=b.lat_a,
-            lon_a=b.lon_a,
-            lat_b=b.lat_b,
-            lon_b=b.lon_b,
-            height_m=b.height_m,
-            enabled=b.enabled,
-            reflection_percent=b.reflection_percent,
-            ground_elevation_m=_terrain_elevation(
-                terrain_samples,
-                (b.lat_a + b.lat_b) / 2.0,
-                (b.lon_a + b.lon_b) / 2.0,
-                lat0,
-                lon0,
-            ),
-        )
-        for b in payload.barriers
-    ]
+    barriers = _barriers_with_buildings(
+        payload.barriers,
+        payload.buildings,
+        terrain_samples,
+        lat0,
+        lon0,
+    )
 
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
@@ -1366,20 +1427,6 @@ def calculate(payload: CalculationRequest):
     lat_values = np.linspace(south, north, n)
     lon_values = np.linspace(west, east, n)
 
-    barriers = [
-        Barrier(
-            name=b.name,
-            lat_a=b.lat_a,
-            lon_a=b.lon_a,
-            lat_b=b.lat_b,
-            lon_b=b.lon_b,
-            height_m=b.height_m,
-            enabled=b.enabled,
-            reflection_percent=b.reflection_percent,
-        )
-        for b in payload.barriers
-    ]
-
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
         frequency_hz=payload.settings.frequency_hz,
@@ -1398,14 +1445,13 @@ def calculate(payload: CalculationRequest):
         source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
         for source in all_sources
     }
-    for barrier_model, barrier_input in zip(barriers, payload.barriers):
-        barrier_model.ground_elevation_m = _terrain_elevation(
-            terrain_samples,
-            (barrier_input.lat_a + barrier_input.lat_b) / 2.0,
-            (barrier_input.lon_a + barrier_input.lon_b) / 2.0,
-            lat0,
-            lon0,
-        )
+    barriers = _barriers_with_buildings(
+        payload.barriers,
+        payload.buildings,
+        terrain_samples,
+        lat0,
+        lon0,
+    )
 
     matrix: list[list[Optional[float]]] = []
     finite: list[float] = []
@@ -1418,6 +1464,15 @@ def calculate(payload: CalculationRequest):
             lon_f = float(lon)
 
             if not point_in_polygon(lat_f, lon_f, polygon):
+                row.append(None)
+                continue
+
+            if any(
+                building.enabled
+                and len(building.points) >= 3
+                and point_in_polygon(lat_f, lon_f, building.points)
+                for building in payload.buildings
+            ):
                 row.append(None)
                 continue
 
