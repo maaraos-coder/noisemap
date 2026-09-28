@@ -393,7 +393,7 @@ function App() {
     vertical_edge_diffraction: true,
     limit_distance: true,
     convex_path: true,
-    reflection_order: 'first-second',
+    reflection_order: 'first',
     facade_1m: true,
     reflector_size_check: true
   })
@@ -2169,7 +2169,6 @@ function App() {
                 onChange={e => setGlobalSettings(s => ({ ...s, reflection_order: e.target.value }))}>
                 <option value="none">Ninguna</option>
                 <option value="first">Primer orden</option>
-                <option value="first-second">Primer y segundo orden</option>
               </select>
             </label>
             <label className="check-row">
@@ -2177,7 +2176,7 @@ function App() {
                 onChange={e => setGlobalSettings(s => ({ ...s, facade_1m: e.target.checked }))} />
               Fachada a 1 m
             </label>
-            <div className="future-note">La interfaz ya almacena estas opciones; las reflexiones se incorporarán al motor físico en la siguiente etapa.</div>
+            <div className="future-note">Activo en el motor: reflexión especular de primer orden mediante fuente imagen. La reflectividad se define en cada barrera.</div>
           </div>
 
           <div className="settings-section">
@@ -2510,6 +2509,14 @@ function App() {
                   <div>
                     <span>Abar</span>
                     <strong>{Number(receiverPreview.diagnostics[0].a_bar_db).toFixed(1)} dB</strong>
+                  </div>
+                  <div>
+                    <span>Reflejado</span>
+                    <strong>
+                      {receiverPreview.diagnostics[0].lp_reflected_db != null
+                        ? Number(receiverPreview.diagnostics[0].lp_reflected_db).toFixed(1) + ' dB'
+                        : '—'}
+                    </strong>
                   </div>
                   {contours.length > 0 && (
                     <div>
