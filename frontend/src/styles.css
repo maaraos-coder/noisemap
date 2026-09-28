@@ -2562,3 +2562,93 @@ select {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+
+/* Definitive mobile bottom object toolbar fix */
+@media (max-width: 900px) {
+  .object-toolbar {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    transform: none !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    max-height: 92px;
+    z-index: 100 !important;
+    overflow: hidden !important;
+    border-radius: 9px !important;
+  }
+
+  .object-toolbar-title {
+    position: sticky;
+    left: 0;
+    height: 22px;
+    font-size: 10px;
+  }
+
+  .object-toolbar-actions {
+    display: flex !important;
+    justify-content: flex-start !important;
+    width: 100%;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    touch-action: pan-x;
+  }
+
+  .object-toolbar .tool-button,
+  .bottom-calculate,
+  .bottom-delete,
+  .bottom-context-action {
+    flex: 0 0 auto !important;
+    min-width: 68px !important;
+    height: 54px !important;
+  }
+
+  .bottom-calculate {
+    min-width: 112px !important;
+  }
+
+  .object-toolbar .tool-label,
+  .bottom-calculate span:last-child,
+  .bottom-delete span:last-child,
+  .bottom-context-action span:last-child {
+    display: block !important;
+    white-space: nowrap;
+  }
+
+  .floating-dirty,
+  .status-pill {
+    bottom: calc(108px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .advanced-object-card {
+    bottom: calc(108px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .map-footer {
+    bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .object-toolbar {
+    left: 4px !important;
+    right: 4px !important;
+    bottom: calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .object-toolbar .tool-button,
+  .bottom-delete,
+  .bottom-context-action {
+    min-width: 62px !important;
+  }
+
+  .bottom-calculate {
+    min-width: 104px !important;
+  }
+}
