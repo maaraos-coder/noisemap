@@ -787,6 +787,7 @@ function App() {
       sources,
       receivers,
       barriers,
+      buildings,
       roads,
       contours,
       polygon: cleanPolygon,
@@ -1484,6 +1485,7 @@ function App() {
             roads,
             receiver: selectedObject,
             barriers,
+            buildings,
             contours,
             settings: {
               resolution,
@@ -1532,6 +1534,7 @@ function App() {
     selectedObject,
     sources,
     barriers,
+    buildings,
     roads,
     contours,
     alpha,
