@@ -1983,7 +1983,72 @@ function App() {
         ctx.strokeStyle = '#111827'
         ctx.lineWidth = 1
         ctx.strokeRect(x1, yRoof, Math.max(2, x2 - x1), Math.max(1, yGround - yRoof))
+
+        ctx.fillStyle = '#111827'
+        ctx.font = '700 9px system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(building.name || 'Edificio', (x1 + x2) / 2, Math.max(margin.top + 12, yRoof - 6))
+        ctx.font = '600 8px system-ui, sans-serif'
+        ctx.fillText(`${Number(building.height_m || 0).toFixed(1)} m`, (x1 + x2) / 2, Math.max(margin.top + 23, yRoof + 11))
       })
+    })
+
+    // Acoustic barriers intersected by the section line.
+    const cross2D = (ax, ay, bx, by) => ax * by - ay * bx
+    const segmentIntersection = (p1, p2, q1, q2) => {
+      const rx = p2[0] - p1[0]
+      const ry = p2[1] - p1[1]
+      const sx = q2[0] - q1[0]
+      const sy = q2[1] - q1[1]
+      const den = cross2D(rx, ry, sx, sy)
+      if (Math.abs(den) < 1e-9) return null
+      const qpx = q1[0] - p1[0]
+      const qpy = q1[1] - p1[1]
+      const t = cross2D(qpx, qpy, sx, sy) / den
+      const u = cross2D(qpx, qpy, rx, ry) / den
+      if (t < 0 || t > 1 || u < 0 || u > 1) return null
+      return { t, u }
+    }
+
+    barriers.filter(barrier => barrier.enabled).forEach(barrier => {
+      const ba = toLocalXY(barrier.lat_a, barrier.lon_a)
+      const bb = toLocalXY(barrier.lat_b, barrier.lon_b)
+      const hit = segmentIntersection([0, 0], [abx, aby], ba, bb)
+      if (!hit) return
+
+      const t = hit.t
+      const terrainIndex = Math.min(
+        terrain.length - 1,
+        Math.max(0, Math.round(t * Math.max(terrain.length - 1, 0)))
+      )
+      const ground = terrain[terrainIndex]?.elevation_m ?? zMin
+      const top = Number(ground) + Number(barrier.height_m || 0)
+      const x = margin.left + t * plotW
+      const yGround = yFor(ground)
+      const yTop = yFor(top)
+
+      ctx.save()
+      ctx.strokeStyle = '#6f42c1'
+      ctx.lineWidth = 6
+      ctx.beginPath()
+      ctx.moveTo(x, yGround)
+      ctx.lineTo(x, yTop)
+      ctx.stroke()
+
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.moveTo(x, yGround)
+      ctx.lineTo(x, yTop)
+      ctx.stroke()
+
+      ctx.fillStyle = '#5b36a8'
+      ctx.font = '700 9px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(barrier.name || 'Barrera', x, Math.max(margin.top + 12, yTop - 8))
+      ctx.font = '600 8px system-ui, sans-serif'
+      ctx.fillText(`${Number(barrier.height_m || 0).toFixed(1)} m`, x, Math.max(margin.top + 23, yTop + 10))
+      ctx.restore()
     })
 
     // Grid and axes.
@@ -2025,10 +2090,10 @@ function App() {
     ctx.fillStyle = '#0f172a'
     ctx.font = '700 11px system-ui, sans-serif'
     ctx.textAlign = 'left'
-    ctx.fillText('A', margin.left + 4, margin.top + 15)
+    ctx.fillText(cutModeType === 'pair' ? 'F' : 'A', margin.left + 4, margin.top + 15)
     ctx.textAlign = 'right'
-    ctx.fillText('B', margin.left + plotW - 4, margin.top + 15)
-  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, cutSourceId, cutReceiverId, distanceSourceId, distanceReceiverId, vmin, vmax])
+    ctx.fillText(cutModeType === 'pair' ? 'R' : 'B', margin.left + plotW - 4, margin.top + 15)
+  }, [cutResult, cutStart, cutEnd, buildings, barriers, sources, receivers, cutSourceId, cutReceiverId, distanceSourceId, distanceReceiverId, cutModeType, vmin, vmax])
 
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
@@ -3370,7 +3435,7 @@ function App() {
 
           <div className="cut-toolbar cut-toolbar-pair">
             <label>
-              Altura adicional
+              Altura máxima del corte
               <div>
                 <input
                   type="number"
