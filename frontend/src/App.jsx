@@ -2752,6 +2752,13 @@ function App() {
         </div>
       )}
 
+      {mode === 'cut' && (
+        <div className="area-drawing-guide cut-drawing-guide">
+          <strong>Corte acústico</strong>
+          <span>{cutStart ? 'Ahora marca el punto B del corte.' : 'Marca el punto A del corte sobre el mapa.'}</span>
+        </div>
+      )}
+
       <div className="utility-toolbar">
         <button
           type="button"
@@ -2813,6 +2820,42 @@ function App() {
         </button>
         <button
           type="button"
+          className={distanceMode !== 'off' || distanceOpen ? 'active' : ''}
+          title="Mostrar distancias entre fuentes y receptores"
+          onClick={() => {
+            setDistanceOpen(v => !v)
+            setSearchOpen(false)
+            setSettingsOpen(false)
+            setLayersOpen(false)
+            setResultsOpen(false)
+            setProjectOpen(false)
+          }}
+        >
+          <span>↔</span><small>Dist. F–R</small>
+        </button>
+        <button
+          type="button"
+          className={mode === 'cut' || cutOpen ? 'active' : ''}
+          title="Crear una visualización de corte acústico vertical"
+          onClick={() => {
+            setCutStart(null)
+            setCutEnd(null)
+            setCutResult(null)
+            setCutError('')
+            setCutOpen(false)
+            setMode('cut')
+            setDistanceOpen(false)
+            setSearchOpen(false)
+            setSettingsOpen(false)
+            setLayersOpen(false)
+            setResultsOpen(false)
+            setProjectOpen(false)
+          }}
+        >
+          <span>▥</span><small>Corte</small>
+        </button>
+        <button
+          type="button"
           className={panelOpen ? 'active' : ''}
           title="Modelo acústico"
           onClick={() => {
@@ -2837,6 +2880,66 @@ function App() {
           <span>⚙</span><small>General</small>
         </button>
       </div>
+
+      {distanceOpen && (
+        <div className="layers-popover distance-popover">
+          <div className="project-popover-header">
+            <div>
+              <span className="eyebrow">DISTANCIAS F–R</span>
+              <strong>Visualización</strong>
+            </div>
+            <button type="button" onClick={() => setDistanceOpen(false)}>×</button>
+          </div>
+          <div className="segmented distance-mode-segmented">
+            {[
+              ['off', 'Off'],
+              ['selected', 'Seleccionados'],
+              ['all', 'Todos']
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={distanceMode === value ? 'active' : ''}
+                onClick={() => {
+                  setDistanceMode(value)
+                  if (value === 'selected') {
+                    setDistanceSourceId('')
+                    setDistanceReceiverId('')
+                    setMode('navigate')
+                  }
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {distanceMode === 'selected' && (
+            <div className="distance-selection-help">
+              <span className={distanceSourceId ? 'done' : ''}>
+                1. {distanceSourceId ? sources.find(item => item.id === distanceSourceId)?.name : 'Selecciona una fuente'}
+              </span>
+              <span className={distanceReceiverId ? 'done' : ''}>
+                2. {distanceReceiverId ? receivers.find(item => item.id === distanceReceiverId)?.name : 'Selecciona un receptor'}
+              </span>
+            </div>
+          )}
+
+          {distanceMode === 'selected' && distancePairs[0] && (
+            <div className="distance-result-card">
+              <div><span>Distancia horizontal</span><strong>{distancePairs[0].horizontal.toFixed(2)} m</strong></div>
+              <div><span>Distancia geométrica 3D*</span><strong>{distancePairs[0].distance3d.toFixed(2)} m</strong></div>
+              <small>*Considera las alturas configuradas de F y R; la línea visible muestra la distancia horizontal en planta.</small>
+            </div>
+          )}
+
+          {distanceMode === 'all' && (
+            <div className="engine-note">
+              Se muestran todas las conexiones fuente–receptor visibles. Las etiquetas se limitan a 40 pares para evitar saturar el mapa.
+            </div>
+          )}
+        </div>
+      )}
 
       {dirty && result && (
         <div className="dirty-chip floating-dirty" title="Cambió la geometría o un parámetro acústico y el mapa necesita actualizarse">
