@@ -2137,7 +2137,7 @@ function App() {
               {index === 0 && <b>INICIO</b>}
             </div>
           </Marker>
-        )))}
+        ))}
 
         {mode === 'barrier' && barrierStart && barrierHover && (
           <Source id="barrier-preview" type="geojson" data={barrierPreviewData}>
