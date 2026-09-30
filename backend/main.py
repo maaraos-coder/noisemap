@@ -90,6 +90,96 @@ def _source_band_level(source, band_hz: int) -> Optional[float]:
     return None
 
 
+def _dict_band_value(values: Dict[str, float], band_hz: float, default: float = 0.0) -> float:
+    if not values:
+        return float(default)
+    nearest = min(OCTAVE_BANDS, key=lambda b: abs(float(b) - float(band_hz)))
+    for key in (str(nearest), nearest):
+        if key in values:
+            try:
+                return max(0.0, float(values[key]))
+            except (TypeError, ValueError):
+                return float(default)
+    return float(default)
+
+
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
+    y = math.sin(dlambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def _angular_difference_deg(a: float, b: float) -> float:
+    return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+
+
+def _source_control_attenuation_db(
+    source,
+    band_hz: float,
+    receiver_lat: Optional[float] = None,
+    receiver_lon: Optional[float] = None,
+) -> float:
+    """Equivalent attenuation of source-side control for one frequency band.
+
+    Enclosures are represented by parallel acoustic transmission paths:
+    panel transmission, leaks/openings and, when present, a silenced ventilation path.
+    This is an engineering approximation for the educational propagation model.
+    """
+    kind = (getattr(source, "noise_control_type", "none") or "none").lower()
+    if kind == "none":
+        return 0.0
+
+    if (source.spectrum_mode or "broadband").lower() == "broadband":
+        return max(0.0, float(getattr(source, "control_global_db", 0.0) or 0.0))
+
+    if kind == "direct":
+        return _dict_band_value(source.control_reduction_db, band_hz)
+
+    if kind == "silencer":
+        return _dict_band_value(source.silencer_il_db, band_hz)
+
+    tl = _dict_band_value(source.enclosure_tl_db, band_hz)
+    tau_panel = 10.0 ** (-tl / 10.0)
+
+    if kind == "enclosure":
+        leak = min(max(float(source.enclosure_leak_pct) / 100.0, 0.0), 1.0)
+        tau = (1.0 - leak) * tau_panel + leak
+        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
+
+    if kind == "semi":
+        opening = min(max(float(source.semi_opening_pct) / 100.0, 0.0), 1.0)
+        in_opening = True
+        if receiver_lat is not None and receiver_lon is not None:
+            bearing = _bearing_deg(source.lat, source.lon, receiver_lat, receiver_lon)
+            in_opening = _angular_difference_deg(
+                bearing, float(source.semi_opening_azimuth_deg)
+            ) <= float(source.semi_opening_angle_deg) / 2.0
+
+        # Within the aperture cone, direct radiation through the opening is
+        # combined energetically with transmission through the closed panels.
+        # Outside that cone, only the panel-transmitted path is used.
+        tau = ((1.0 - opening) * tau_panel + opening) if in_opening else tau_panel
+        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
+
+    if kind == "enclosure_silencer":
+        leak = min(max(float(source.enclosure_leak_pct) / 100.0, 0.0), 1.0)
+        vent = min(max(float(source.enclosure_vent_pct) / 100.0, 0.0), 1.0)
+        if leak + vent > 1.0:
+            scale = 1.0 / (leak + vent)
+            leak *= scale
+            vent *= scale
+        closed = max(0.0, 1.0 - leak - vent)
+        silencer_il = _dict_band_value(source.silencer_il_db, band_hz)
+        tau_silencer = 10.0 ** (-silencer_il / 10.0)
+        tau = closed * tau_panel + leak + vent * tau_silencer
+        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
+
+    return 0.0
+
+
 def _settings_for_band(base, band_hz: float) -> PropagationSettings:
     alpha_db_per_km = (
         atmospheric_absorption_iso9613_db_per_m(
@@ -143,12 +233,15 @@ def _source_spectral_result(
                 bands_db[str(band)] = None
                 continue
 
+            control_att = _source_control_attenuation_db(
+                source_input, band, receiver_lat, receiver_lon
+            )
             source_model = Source(
                 name=source_input.name,
                 lat=source_input.lat,
                 lon=source_input.lon,
                 height_m=source_input.height_m,
-                lw_db=lw + adjustment,
+                lw_db=lw + adjustment - control_att,
                 dc_db=source_input.dc_db,
                 enabled=source_input.enabled,
                 ground_elevation_m=source_ground_elevation_m,
@@ -182,12 +275,15 @@ def _source_spectral_result(
 
     if mode == "single":
         frequency = max(float(source_input.single_frequency_hz), 1.0)
+        control_att = _source_control_attenuation_db(
+            source_input, frequency, receiver_lat, receiver_lon
+        )
         source_model = Source(
             name=source_input.name,
             lat=source_input.lat,
             lon=source_input.lon,
             height_m=source_input.height_m,
-            lw_db=float(source_input.lw_db) + adjustment,
+            lw_db=float(source_input.lw_db) + adjustment - control_att,
             dc_db=source_input.dc_db,
             enabled=source_input.enabled,
             ground_elevation_m=source_ground_elevation_m,
@@ -223,12 +319,15 @@ def _source_spectral_result(
 
     # Broadband is entered as LwA in the current UI. It is propagated as a
     # broadband A-weighted quantity, so no artificial octave spectrum is invented.
+    control_att = _source_control_attenuation_db(
+        source_input, base_settings.frequency_hz, receiver_lat, receiver_lon
+    )
     source_model = Source(
         name=source_input.name,
         lat=source_input.lat,
         lon=source_input.lon,
         height_m=source_input.height_m,
-        lw_db=float(source_input.lw_db) + adjustment,
+        lw_db=float(source_input.lw_db) + adjustment - control_att,
         dc_db=source_input.dc_db,
         enabled=source_input.enabled,
         ground_elevation_m=source_ground_elevation_m,
@@ -576,6 +675,16 @@ class SourceIn(BaseModel):
     octave_levels: Dict[str, float] = {}
     adjust_db: float = 0.0
     time_active_pct: float = 100.0
+    noise_control_type: str = "none"
+    control_global_db: float = Field(default=0.0, ge=0.0, le=80.0)
+    control_reduction_db: Dict[str, float] = {}
+    silencer_il_db: Dict[str, float] = {}
+    enclosure_tl_db: Dict[str, float] = {}
+    enclosure_leak_pct: float = Field(default=0.0, ge=0.0, le=100.0)
+    enclosure_vent_pct: float = Field(default=10.0, ge=0.0, le=100.0)
+    semi_opening_pct: float = Field(default=25.0, ge=0.0, le=100.0)
+    semi_opening_azimuth_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
+    semi_opening_angle_deg: float = Field(default=90.0, gt=0.0, le=360.0)
     parent_id: Optional[str] = None
     parent_name: Optional[str] = None
     source_kind: str = "point"
