@@ -1789,6 +1789,76 @@ function App() {
       ctx.stroke()
     }
 
+    const toLocalXY = (lat, lon) => {
+      const meanLat = ((Number(cutStart[0]) + Number(cutEnd[0])) / 2) * Math.PI / 180
+      const metersPerDegLat = 111320
+      const metersPerDegLon = 111320 * Math.max(Math.cos(meanLat), 0.2)
+      const x = (Number(lon) - Number(cutStart[1])) * metersPerDegLon
+      const y = (Number(lat) - Number(cutStart[0])) * metersPerDegLat
+      return [x, y]
+    }
+    const [abx, aby] = toLocalXY(cutEnd[0], cutEnd[1])
+    const abLen2 = Math.max(abx * abx + aby * aby, 1)
+    const projectToCut = (lat, lon) => {
+      const [px, py] = toLocalXY(lat, lon)
+      const tRaw = (px * abx + py * aby) / abLen2
+      const t = Math.max(0, Math.min(1, tRaw))
+      const cross = Math.abs(px * aby - py * abx) / Math.sqrt(abLen2)
+      return { t, cross }
+    }
+
+    // Show sources and receivers that lie close to the A-B vertical plane.
+    const cutToleranceM = 8
+    sources.filter(item => item.enabled).forEach(source => {
+      const projected = projectToCut(source.lat, source.lon)
+      if (projected.cross > cutToleranceM) return
+      const terrainIndex = Math.min(
+        terrain.length - 1,
+        Math.max(0, Math.round(projected.t * Math.max(terrain.length - 1, 0)))
+      )
+      const ground = terrain[terrainIndex]?.elevation_m ?? zMin
+      const z = Number(ground) + Number(source.height_m || 0)
+      const x = margin.left + projected.t * plotW
+      const y = yFor(z)
+
+      ctx.beginPath()
+      ctx.arc(x, y, 6, 0, Math.PI * 2)
+      ctx.fillStyle = '#d93648'
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.fillStyle = '#7d2430'
+      ctx.font = '700 10px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(source.name || 'F', x, y - 10)
+    })
+
+    receivers.filter(item => item.visible !== false).forEach(receiver => {
+      const projected = projectToCut(receiver.lat, receiver.lon)
+      if (projected.cross > cutToleranceM) return
+      const terrainIndex = Math.min(
+        terrain.length - 1,
+        Math.max(0, Math.round(projected.t * Math.max(terrain.length - 1, 0)))
+      )
+      const ground = terrain[terrainIndex]?.elevation_m ?? zMin
+      const z = Number(ground) + Number(receiver.height_m || 0)
+      const x = margin.left + projected.t * plotW
+      const y = yFor(z)
+
+      ctx.beginPath()
+      ctx.arc(x, y, 5, 0, Math.PI * 2)
+      ctx.fillStyle = '#0b63ce'
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.fillStyle = '#0b3768'
+      ctx.font = '700 10px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(receiver.name || 'R', x, y - 10)
+    })
+
     // Building solids intersected by the A-B cut.
     const sampleCount = 180
     buildings.filter(building => building.enabled && building.points?.length >= 3).forEach(building => {
@@ -1869,7 +1939,7 @@ function App() {
     ctx.fillText('A', margin.left + 4, margin.top + 15)
     ctx.textAlign = 'right'
     ctx.fillText('B', margin.left + plotW - 4, margin.top + 15)
-  }, [cutResult, cutStart, cutEnd, buildings, vmin, vmax])
+  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, vmin, vmax])
 
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
@@ -2389,8 +2459,12 @@ function App() {
             }}
             onClick={e => {
               e.originalEvent.stopPropagation()
+              if (distanceMode === 'selected') {
+                setDistanceSourceId(source.id)
+                setSelected(null)
+                return
+              }
               setSelected({ type: 'source', id: source.id })
-              if (distanceMode === 'selected') setDistanceSourceId(source.id)
             }}
           >
             <div className="technical-marker source-marker" title={source.name}>
@@ -2424,8 +2498,12 @@ function App() {
             }}
             onClick={e => {
               e.originalEvent.stopPropagation()
+              if (distanceMode === 'selected') {
+                setDistanceReceiverId(receiver.id)
+                setSelected(null)
+                return
+              }
               setSelected({ type: 'receiver', id: receiver.id })
-              if (distanceMode === 'selected') setDistanceReceiverId(receiver.id)
             }}
           >
             <div className="technical-marker receiver-marker" title={receiver.name}>
@@ -3197,7 +3275,7 @@ function App() {
               </div>
 
               <div className="engine-note">
-                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro y los edificios interceptados por el corte como sólidos. Los colores representan el nivel calculado en cada punto del plano vertical.
+                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro, los edificios interceptados por el corte como sólidos, las fuentes cercanas al plano A–B en rojo y los receptores en azul. Los colores representan el nivel calculado en cada punto del plano vertical.
               </div>
             </>
           )}
