@@ -3478,3 +3478,141 @@ select {
     display: none;
   }
 }
+
+
+/* Source noise-control editor */
+.source-control-heading {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e7ed;
+}
+
+.control-method-note {
+  margin: 8px 0;
+  padding: 8px 9px;
+  border-left: 3px solid #6f7f8f;
+  border-radius: 0 7px 7px 0;
+  background: #f5f7f9;
+  color: #596876;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.control-band-editor {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 10px;
+  padding: 8px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.control-band-title,
+.control-band-editor label {
+  display: grid;
+  grid-template-columns: minmax(58px,.8fr) minmax(90px,1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.control-band-title {
+  padding: 0 2px 4px;
+  color: #75828e;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.control-band-editor label {
+  color: #566574;
+  font-size: 9px;
+}
+
+.control-band-editor input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 7px;
+}
+
+.control-secondary-fields {
+  margin-top: 8px;
+}
+
+.control-inner-heading {
+  margin-top: 10px;
+  font-size: 10px;
+}
+
+.control-summary {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #d8e1e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.control-summary-head,
+.control-summary-row {
+  display: grid;
+  grid-template-columns: .75fr 1fr 1fr 1fr;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 7px;
+  text-align: right;
+}
+
+.control-summary-head {
+  background: #edf3f8;
+  color: #647383;
+  font-size: 7px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+
+.control-summary-row {
+  border-top: 1px solid #edf1f4;
+  color: #536270;
+  font-size: 8px;
+}
+
+.control-summary-row span:first-child,
+.control-summary-head span:first-child {
+  text-align: left;
+}
+
+.control-summary-row strong {
+  color: #0b3768;
+}
+
+.control-summary small {
+  display: block;
+  padding: 7px;
+  border-top: 1px solid #e8edf1;
+  background: #f8fafb;
+  color: #74818d;
+  font-size: 7.5px;
+  line-height: 1.35;
+}
+
+.source-control-badge {
+  position: absolute;
+  right: -7px;
+  bottom: -6px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #34495e;
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  font-size: 7px;
+  font-weight: 900;
+}
+
+.engine-note.warning {
+  border-left-color: #c79024;
+  background: #fff9ea;
+}
