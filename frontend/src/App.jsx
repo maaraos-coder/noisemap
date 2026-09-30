@@ -1716,6 +1716,154 @@ function App() {
     ? result?.receiver_results?.find(item => item.id === selected.id)
     : null
 
+
+  useEffect(() => {
+    const canvas = cutCanvasRef.current
+    if (!canvas || !cutResult?.levels?.length || !cutStart || !cutEnd) return
+
+    const width = 920
+    const heightPx = 430
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
+    canvas.width = width * dpr
+    canvas.height = heightPx * dpr
+    const ctx = canvas.getContext('2d')
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, width, heightPx)
+
+    const margin = { left: 58, right: 22, top: 22, bottom: 48 }
+    const plotW = width - margin.left - margin.right
+    const plotH = heightPx - margin.top - margin.bottom
+    const levels = cutResult.levels
+    const rows = levels.length
+    const cols = levels[0]?.length || 0
+    if (!rows || !cols) return
+
+    ctx.fillStyle = '#f8fafc'
+    ctx.fillRect(margin.left, margin.top, plotW, plotH)
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const value = levels[row][col]
+        if (value == null || !Number.isFinite(Number(value))) continue
+        const [r, g, b] = levelColor(Number(value), vmin, vmax)
+        ctx.fillStyle = `rgba(${r},${g},${b},0.78)`
+        const x = margin.left + col * plotW / cols
+        const y = margin.top + row * plotH / rows
+        ctx.fillRect(x, y, plotW / cols + 1, plotH / rows + 1)
+      }
+    }
+
+    const zMin = Number(cutResult.z_min_m)
+    const zMax = Number(cutResult.z_max_m)
+    const distanceM = Math.max(1, Number(cutResult.distance_m))
+    const xFor = d => margin.left + (Number(d) / distanceM) * plotW
+    const yFor = z => margin.top + (1 - (Number(z) - zMin) / Math.max(zMax - zMin, 0.001)) * plotH
+
+    // Terrain silhouette.
+    const terrain = cutResult.terrain_profile || []
+    if (terrain.length) {
+      ctx.beginPath()
+      ctx.moveTo(xFor(terrain[0].distance_m), yFor(terrain[0].elevation_m))
+      terrain.slice(1).forEach(item => ctx.lineTo(xFor(item.distance_m), yFor(item.elevation_m)))
+      ctx.lineTo(xFor(distanceM), margin.top + plotH)
+      ctx.lineTo(margin.left, margin.top + plotH)
+      ctx.closePath()
+      ctx.fillStyle = 'rgba(70,79,88,0.72)'
+      ctx.fill()
+      ctx.beginPath()
+      terrain.forEach((item, index) => {
+        const x = xFor(item.distance_m)
+        const y = yFor(item.elevation_m)
+        if (index === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      })
+      ctx.strokeStyle = '#26313b'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    }
+
+    // Building solids intersected by the A-B cut.
+    const sampleCount = 180
+    buildings.filter(building => building.enabled && building.points?.length >= 3).forEach(building => {
+      let activeStart = null
+      const spans = []
+      for (let i = 0; i <= sampleCount; i += 1) {
+        const t = i / sampleCount
+        const lat = cutStart[0] + (cutEnd[0] - cutStart[0]) * t
+        const lon = cutStart[1] + (cutEnd[1] - cutStart[1]) * t
+        const inside = pointInPolygon2D(lat, lon, building.points)
+        if (inside && activeStart == null) activeStart = t
+        if ((!inside || i === sampleCount) && activeStart != null) {
+          const endT = inside && i === sampleCount ? t : Math.max(activeStart, (i - 1) / sampleCount)
+          spans.push([activeStart, endT])
+          activeStart = null
+        }
+      }
+
+      spans.forEach(([t1, t2]) => {
+        const centerT = (t1 + t2) / 2
+        const terrainIndex = Math.min(
+          terrain.length - 1,
+          Math.max(0, Math.round(centerT * Math.max(terrain.length - 1, 0)))
+        )
+        const ground = terrain[terrainIndex]?.elevation_m ?? zMin
+        const roof = Number(ground) + Number(building.height_m || 0)
+        const x1 = margin.left + t1 * plotW
+        const x2 = margin.left + t2 * plotW
+        const yRoof = yFor(roof)
+        const yGround = yFor(ground)
+        ctx.fillStyle = 'rgba(49,56,63,0.90)'
+        ctx.fillRect(x1, yRoof, Math.max(2, x2 - x1), Math.max(1, yGround - yRoof))
+        ctx.strokeStyle = '#111827'
+        ctx.lineWidth = 1
+        ctx.strokeRect(x1, yRoof, Math.max(2, x2 - x1), Math.max(1, yGround - yRoof))
+      })
+    })
+
+    // Grid and axes.
+    ctx.font = '11px system-ui, sans-serif'
+    ctx.fillStyle = '#52606d'
+    ctx.strokeStyle = 'rgba(82,96,109,0.18)'
+    ctx.lineWidth = 1
+    for (let i = 0; i <= 5; i += 1) {
+      const x = margin.left + i * plotW / 5
+      const d = distanceM * i / 5
+      ctx.beginPath()
+      ctx.moveTo(x, margin.top)
+      ctx.lineTo(x, margin.top + plotH)
+      ctx.stroke()
+      ctx.textAlign = 'center'
+      ctx.fillText(`${d.toFixed(0)} m`, x, margin.top + plotH + 20)
+    }
+    for (let i = 0; i <= 5; i += 1) {
+      const z = zMin + (zMax - zMin) * i / 5
+      const y = yFor(z)
+      ctx.beginPath()
+      ctx.moveTo(margin.left, y)
+      ctx.lineTo(margin.left + plotW, y)
+      ctx.stroke()
+      ctx.textAlign = 'right'
+      ctx.fillText(`${z.toFixed(1)} m`, margin.left - 8, y + 4)
+    }
+
+    ctx.fillStyle = '#26313b'
+    ctx.textAlign = 'center'
+    ctx.font = '600 11px system-ui, sans-serif'
+    ctx.fillText('Distancia a lo largo del corte A–B', margin.left + plotW / 2, heightPx - 8)
+    ctx.save()
+    ctx.translate(14, margin.top + plotH / 2)
+    ctx.rotate(-Math.PI / 2)
+    ctx.fillText('Cota / altura [m]', 0, 0)
+    ctx.restore()
+
+    ctx.fillStyle = '#0f172a'
+    ctx.font = '700 11px system-ui, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.fillText('A', margin.left + 4, margin.top + 15)
+    ctx.textAlign = 'right'
+    ctx.fillText('B', margin.left + plotW - 4, margin.top + 15)
+  }, [cutResult, cutStart, cutEnd, buildings, vmin, vmax])
+
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
     const distances = receivers.map(r => ({
