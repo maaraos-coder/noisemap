@@ -1961,7 +1961,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon, buildingDraft, contourDraft, roadDraft, mode, polygon])
+  }, [selected, barrierStart, lineStart, draftPolygon, buildingDraft, contourDraft, roadDraft, mode, polygon, cutStart])
 
   const imageCoordinates = result?.bounds
     ? [
@@ -2696,7 +2696,7 @@ function App() {
             </button>
           )}
 
-          {(mode === 'road' || mode === 'contour' || mode === 'building' || mode === 'area' || barrierStart || lineStart) && (
+          {(mode === 'road' || mode === 'contour' || mode === 'building' || mode === 'area' || mode === 'cut' || barrierStart || lineStart) && (
             <button
               type="button"
               className="bottom-context-action cancel"
