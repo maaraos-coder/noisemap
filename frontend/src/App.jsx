@@ -581,6 +581,7 @@ function App() {
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   const [controlEditorOpen, setControlEditorOpen] = useState(false)
+  const [treatmentTab, setTreatmentTab] = useState('geometry')
   const [sourceCardPos, setSourceCardPos] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
@@ -2363,6 +2364,18 @@ function App() {
       }
     })
   }
+  const setSourceTreatmentType = type => {
+    if (!selectedObject || selected?.type !== 'source') return
+    const baseFaces = { ...defaultEnclosureFaces(), ...(selectedObject.enclosure_faces || {}) }
+    const hasOpening = Object.values(baseFaces).some(face => ['open','partial'].includes(face?.state))
+    if (type === 'semi' && !hasOpening) {
+      baseFaces.front = { ...baseFaces.front, state:'open', opening_pct:100 }
+    }
+    patchSelected({ noise_control_type:type, enclosure_faces:baseFaces })
+    if (['enclosure','semi','enclosure_silencer'].includes(type)) setTreatmentTab('geometry')
+    else setTreatmentTab('surfaces')
+  }
+
 
   const removeSelected = () => {
     if (!selected) return
@@ -4696,183 +4709,254 @@ function App() {
       )}
 
       {controlEditorOpen && selected?.type === 'source' && selectedObject && (
-        <div className="floating-dialog source-treatment-dialog">
-          <div className="dialog-header">
+        <div className="floating-dialog source-treatment-dialog treatment-redesign">
+          <div className="dialog-header treatment-header">
             <div>
               <span className="eyebrow">FUENTE · CONTROL DE RUIDO</span>
-              <h3>Configurar tratamiento · {selectedObject.name}</h3>
+              <h3>Configurar tratamiento de control de ruido</h3>
+              <small>{selectedObject.name} · {selectedObject.spectrum_mode === 'single' ? `Single · ${selectedObject.single_frequency_hz} Hz` : selectedObject.spectrum_mode === 'octaves' ? 'Octavas' : 'Broadband · LwA'}</small>
             </div>
             <button onClick={() => setControlEditorOpen(false)}>×</button>
           </div>
 
-          <div className="treatment-top-grid">
-            <label>Tratamiento
-              <select
-                value={selectedObject.noise_control_type || 'none'}
-                onChange={e => patchSelected({ noise_control_type:e.target.value })}
+          <div className="treatment-type-strip">
+            {[
+              ['none','◖','Sin tratamiento'],
+              ['silencer','▰','Silenciador'],
+              ['enclosure','▣','Encierro'],
+              ['semi','◫','Semiencierro'],
+              ['enclosure_silencer','▣◖','Encierro + silenciador'],
+              ['direct','−dB','Reducción directa']
+            ].map(([value,icon,label]) => (
+              <button
+                key={value}
+                type="button"
+                className={(selectedObject.noise_control_type || 'none') === value ? 'active' : ''}
+                onClick={() => setSourceTreatmentType(value)}
               >
-                <option value="none">Sin tratamiento</option>
-                <option value="direct">Reducción directa de la fuente</option>
-                <option value="silencer">Silenciador / conducto</option>
-                <option value="enclosure">Encierro completo</option>
-                <option value="semi">Semiencierro</option>
-                <option value="enclosure_silencer">Encierro + silenciador</option>
-              </select>
-            </label>
-            <div className="treatment-mode-info">
-              <span>Fuente</span>
-              <strong>{selectedObject.spectrum_mode === 'single' ? `Single · ${selectedObject.single_frequency_hz} Hz` : selectedObject.spectrum_mode === 'octaves' ? 'Octavas' : 'Broadband · LwA'}</strong>
-            </div>
+                <span className="treatment-type-icon">{icon}</span>
+                <strong>{label}</strong>
+              </button>
+            ))}
           </div>
 
-          {(selectedObject.noise_control_type || 'none') === 'none' && (
-            <div className="engine-note">No hay atenuación de control aplicada a esta fuente.</div>
-          )}
-
-          {(selectedObject.noise_control_type || 'none') === 'direct' && (
-            <>
-              <div className="control-method-note">Reducción directa de emisión. En Single se usa solo la banda más próxima a la frecuencia seleccionada.</div>
-              <div className="control-band-editor treatment-band-grid">
-                {OCTAVE_BANDS.map(freq => (
-                  <label key={freq}>
-                    <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
-                    <input type="number" min="0" max="80" step="0.5"
-                      value={selectedObject.control_reduction_db?.[freq] ?? 0}
-                      onChange={e => patchSelected({control_reduction_db:{...(selectedObject.control_reduction_db || DEFAULT_CONTROL_BANDS),[freq]:Number(e.target.value)}})} />
-                  </label>
-                ))}
+          {(() => {
+            const faces = { ...defaultEnclosureFaces(), ...(selectedObject.enclosure_faces || {}) }
+            const openFaces = ENCLOSURE_FACES.filter(([key]) => faces[key]?.state === 'open')
+            const partialFaces = ENCLOSURE_FACES.filter(([key]) => faces[key]?.state === 'partial')
+            const type = selectedObject.noise_control_type || 'none'
+            if (!['enclosure','semi','enclosure_silencer'].includes(type)) return null
+            return (
+              <div className={`treatment-banner ${type === 'semi' ? 'info' : ''}`}>
+                <b>{type === 'semi' ? 'Semiencierro' : type === 'enclosure' ? 'Encierro' : 'Encierro + silenciador'}</b>
+                <span>
+                  {type === 'semi'
+                    ? (openFaces.length || partialFaces.length
+                      ? ` · Cara(s) abierta(s): ${[...openFaces,...partialFaces].map(([,label]) => label).join(', ')}.`
+                      : ' · No hay una cara abierta: defínela en Geometría o Superficies.')
+                    : ' · Define la geometría y el comportamiento acústico de cada superficie.'}
+                </span>
               </div>
-            </>
-          )}
+            )
+          })()}
 
-          {(selectedObject.noise_control_type || 'none') === 'silencer' && (
-            <>
-              <div className="control-method-note">Pérdida de inserción IL del silenciador/ducto por banda.</div>
-              <div className="control-band-editor treatment-band-grid">
-                {OCTAVE_BANDS.map(freq => (
-                  <label key={freq}>
-                    <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
-                    <input type="number" min="0" max="80" step="0.5"
-                      value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]}
-                      onChange={e => patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})} />
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
+          <div className="treatment-tabs">
+            {[
+              ['geometry','Geometría y orientación'],
+              ['surfaces','Superficies (TL / Rw)'],
+              ['examples','Vista 3D / Ejemplos'],
+              ['results','Resultados']
+            ].map(([value,label]) => (
+              <button type="button" key={value} className={treatmentTab === value ? 'active' : ''} onClick={() => setTreatmentTab(value)}>{label}</button>
+            ))}
+          </div>
 
-          {['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') && (
-            <>
-              <h4 className="subheading">Geometría del cerramiento</h4>
-              <div className="geometry-grid">
-                <label>Largo [m]<input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_length_m ?? 2} onChange={e => patchSelected({enclosure_length_m:Number(e.target.value)})}/></label>
-                <label>Ancho [m]<input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_width_m ?? 2} onChange={e => patchSelected({enclosure_width_m:Number(e.target.value)})}/></label>
-                <label>Alto [m]<input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_height_m ?? 2.5} onChange={e => patchSelected({enclosure_height_m:Number(e.target.value)})}/></label>
-                <label>Azimut frente [°]<input type="number" min="0" max="359" step="1" value={selectedObject.enclosure_azimuth_deg ?? 0} onChange={e => patchSelected({enclosure_azimuth_deg:Number(e.target.value)})}/></label>
-              </div>
-              <div className="engine-note">
-                El azimut define hacia dónde mira la cara “Frente”. La dirección fuente–receptor determina qué cara vertical atraviesa el camino acústico.
-              </div>
+          {treatmentTab === 'geometry' && ['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') && (
+            <div className="treatment-geometry-layout">
+              <section className="treatment-panel geometry-controls-panel">
+                <h4>Dimensiones del encierro</h4>
+                <div className="geometry-input-stack">
+                  <label>Largo (X)<div><input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_length_m ?? 2} onChange={e => patchSelected({enclosure_length_m:Number(e.target.value)})}/><span>m</span></div></label>
+                  <label>Ancho (Y)<div><input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_width_m ?? 2} onChange={e => patchSelected({enclosure_width_m:Number(e.target.value)})}/><span>m</span></div></label>
+                  <label>Alto (Z)<div><input type="number" min="0.1" step="0.1" value={selectedObject.enclosure_height_m ?? 2.5} onChange={e => patchSelected({enclosure_height_m:Number(e.target.value)})}/><span>m</span></div></label>
+                </div>
+                <h4>Orientación</h4>
+                <label className="azimuth-field">Azimut de la cara frontal
+                  <div><input type="number" min="0" max="359" step="1" value={selectedObject.enclosure_azimuth_deg ?? 0} onChange={e => patchSelected({enclosure_azimuth_deg:Number(e.target.value)})}/><span>°</span></div>
+                </label>
+                <div className="north-compass">
+                  <span>N</span>
+                  <div className="compass-circle"><i style={{transform:`rotate(${Number(selectedObject.enclosure_azimuth_deg || 0)}deg)`}}>↑</i></div>
+                  <small>0° = Norte · sentido horario</small>
+                </div>
+              </section>
 
-              <h4 className="subheading">Superficies</h4>
-              <div className="enclosure-face-list">
-                {ENCLOSURE_FACES.map(([faceKey,faceLabel]) => {
-                  const defaults = defaultEnclosureFaces()[faceKey]
-                  const face = {...defaults,...(selectedObject.enclosure_faces?.[faceKey] || {})}
-                  const area = faceKey === 'roof' || faceKey === 'floor'
-                    ? Number(selectedObject.enclosure_length_m || 0) * Number(selectedObject.enclosure_width_m || 0)
-                    : (faceKey === 'front' || faceKey === 'back'
-                      ? Number(selectedObject.enclosure_width_m || 0) * Number(selectedObject.enclosure_height_m || 0)
-                      : Number(selectedObject.enclosure_length_m || 0) * Number(selectedObject.enclosure_height_m || 0))
+              <section className="treatment-panel">
+                <h4>Vista en planta (arriba)</h4>
+                {(() => {
+                  const faces = { ...defaultEnclosureFaces(), ...(selectedObject.enclosure_faces || {}) }
+                  const stateClass = key => `face-${faces[key]?.state || 'closed'}`
                   return (
-                    <div className="enclosure-face-card" key={faceKey}>
-                      <div className="face-card-head">
-                        <div><strong>{faceLabel}</strong><span>{area.toFixed(2)} m²</span></div>
-                        <select value={face.state || 'closed'} onChange={e => patchEnclosureFace(faceKey,{state:e.target.value})}>
-                          <option value="closed">Cerrada</option>
-                          <option value="open">Abierta</option>
-                          <option value="partial">Parcial</option>
-                        </select>
-                      </div>
-                      {(face.state || 'closed') === 'partial' && (
-                        <label className="compact-field">% abierto
-                          <input type="number" min="0" max="100" step="1" value={face.opening_pct ?? 25} onChange={e => patchEnclosureFace(faceKey,{opening_pct:Number(e.target.value)})}/>
-                        </label>
-                      )}
-                      {(face.state || 'closed') !== 'open' && (
-                        <>
-                          <div className="face-mode-tabs">
-                            <button type="button" className={(face.acoustic_mode || 'rw') === 'rw' ? 'active' : ''} onClick={() => patchEnclosureFace(faceKey,{acoustic_mode:'rw'})}>Rw único</button>
-                            <button type="button" className={face.acoustic_mode === 'spectrum' ? 'active' : ''} onClick={() => patchEnclosureFace(faceKey,{acoustic_mode:'spectrum'})}>TL por bandas</button>
-                          </div>
-                          {(face.acoustic_mode || 'rw') === 'rw' ? (
-                            <>
-                              <label className="compact-field">Rw [dB]
-                                <input type="number" min="0" max="100" step="1" value={face.rw_db ?? 30} onChange={e => patchEnclosureFace(faceKey,{rw_db:Number(e.target.value)})}/>
-                              </label>
-                              <div className="rw-preview">
-                                {OCTAVE_BANDS.map(freq => <span key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><b>{estimatedTlFromRw(face.rw_db ?? 30,freq).toFixed(0)}</b></span>)}
-                              </div>
-                              <small className="estimate-note">Espectro TL estimado desde Rw; use “TL por bandas” cuando disponga de datos medidos o certificados.</small>
-                            </>
-                          ) : (
-                            <div className="face-spectrum-grid">
-                              {OCTAVE_BANDS.map(freq => (
-                                <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
-                                  <input type="number" min="0" max="100" step="0.5" value={face.tl_db?.[freq] ?? DEFAULT_ENCLOSURE_TL[freq]}
-                                    onChange={e => patchEnclosureFace(faceKey,{tl_db:{...(face.tl_db || DEFAULT_ENCLOSURE_TL),[freq]:Number(e.target.value)}})}/>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    <svg className="enclosure-plan-svg" viewBox="0 0 420 300" role="img" aria-label="Vista en planta del encierro">
+                      <rect x="105" y="65" width="210" height="165" className="plan-body"/>
+                      <line x1="105" y1="65" x2="315" y2="65" className={`plan-face back ${stateClass('back')}`}/>
+                      <line x1="105" y1="230" x2="315" y2="230" className={`plan-face front ${stateClass('front')}`}/>
+                      <line x1="105" y1="65" x2="105" y2="230" className={`plan-face left ${stateClass('left')}`}/>
+                      <line x1="315" y1="65" x2="315" y2="230" className={`plan-face right ${stateClass('right')}`}/>
+                      <line x1="210" y1="42" x2="210" y2="255" className="plan-axis"/>
+                      <line x1="75" y1="147" x2="345" y2="147" className="plan-axis"/>
+                      <text x="210" y="31" textAnchor="middle">Fondo (180°)</text>
+                      <text x="210" y="278" textAnchor="middle" className="front-label">Frente (0°)</text>
+                      <text x="57" y="151" textAnchor="middle">Izquierda</text>
+                      <text x="365" y="151" textAnchor="middle">Derecha</text>
+                      <text x="210" y="296" textAnchor="middle" className="plan-help">Azimut real: {Number(selectedObject.enclosure_azimuth_deg || 0).toFixed(0)}°</text>
+                    </svg>
                   )
-                })}
-              </div>
-            </>
+                })()}
+                <div className="face-state-legend">
+                  <span><i className="legend-closed"/> Cerrada</span>
+                  <span><i className="legend-partial"/> Parcial</span>
+                  <span><i className="legend-open"/> Abierta</span>
+                </div>
+              </section>
+
+              <section className="treatment-panel">
+                <h4>Vista 3D (isométrica)</h4>
+                {(() => {
+                  const faces = { ...defaultEnclosureFaces(), ...(selectedObject.enclosure_faces || {}) }
+                  const c = key => `iso-face face-${faces[key]?.state || 'closed'}`
+                  return (
+                    <svg className="enclosure-iso-svg" viewBox="0 0 420 300" role="img" aria-label="Vista isométrica del encierro">
+                      <polygon points="115,110 235,55 325,95 205,150" className={c('roof')}/>
+                      <polygon points="115,110 205,150 205,250 115,210" className={c('left')}/>
+                      <polygon points="205,150 325,95 325,195 205,250" className={c('right')}/>
+                      <polygon points="115,110 235,55 235,155 115,210" className={c('back')}/>
+                      <polygon points="205,150 325,95 325,195 205,250" className={`${c('front')} iso-front-highlight`}/>
+                      <text x="274" y="70">Fondo</text>
+                      <text x="64" y="167">Izquierda</text>
+                      <text x="333" y="159">Derecha</text>
+                      <text x="223" y="38">Techo</text>
+                      <text x="258" y="274" className="front-label">Frente</text>
+                      {faces.front?.state === 'open' && <text x="258" y="289" className="open-label">(abierta)</text>}
+                    </svg>
+                  )
+                })()}
+                <div className="orientation-note">La cara “Frente” es la referencia angular del encierro. Al girar el azimut, también cambia qué superficie queda enfrentada a cada receptor.</div>
+              </section>
+            </div>
           )}
 
-          {(selectedObject.noise_control_type || 'none') === 'enclosure_silencer' && (
-            <>
-              <h4 className="subheading">Ventilación con silenciador</h4>
+          {treatmentTab === 'surfaces' && ['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') && (
+            <div className="treatment-panel surface-table-panel">
+              <div className="surface-table-head">
+                <span>Superficie</span><span>Estado</span><span>% abierta</span><span>Caracterización</span><span>Rw</span><span>TL por bandas</span>
+              </div>
+              {ENCLOSURE_FACES.map(([faceKey,faceLabel]) => {
+                const defaults = defaultEnclosureFaces()[faceKey]
+                const face = {...defaults,...(selectedObject.enclosure_faces?.[faceKey] || {})}
+                return (
+                  <div className={`surface-table-row ${face.state || 'closed'}`} key={faceKey}>
+                    <strong>{faceLabel}</strong>
+                    <select value={face.state || 'closed'} onChange={e => patchEnclosureFace(faceKey,{state:e.target.value})}>
+                      <option value="closed">Cerrada</option>
+                      <option value="open">Abierta</option>
+                      <option value="partial">Parcial</option>
+                    </select>
+                    <input type="number" min="0" max="100" step="1" disabled={face.state !== 'partial'} value={face.state === 'open' ? 100 : face.state === 'partial' ? (face.opening_pct ?? 25) : 0} onChange={e => patchEnclosureFace(faceKey,{opening_pct:Number(e.target.value)})}/>
+                    <select disabled={face.state === 'open'} value={face.acoustic_mode || 'rw'} onChange={e => patchEnclosureFace(faceKey,{acoustic_mode:e.target.value})}>
+                      <option value="rw">Rw único</option>
+                      <option value="spectrum">TL por bandas</option>
+                    </select>
+                    <input type="number" min="0" max="100" step="1" disabled={face.state === 'open' || face.acoustic_mode === 'spectrum'} value={face.rw_db ?? 30} onChange={e => patchEnclosureFace(faceKey,{rw_db:Number(e.target.value)})}/>
+                    <div className="surface-band-cells">
+                      {OCTAVE_BANDS.map(freq => (
+                        <label key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><input type="number" min="0" max="100" step="0.5" disabled={face.state === 'open' || face.acoustic_mode !== 'spectrum'} value={face.acoustic_mode === 'spectrum' ? (face.tl_db?.[freq] ?? DEFAULT_ENCLOSURE_TL[freq]) : estimatedTlFromRw(face.rw_db ?? 30,freq).toFixed(0)} onChange={e => patchEnclosureFace(faceKey,{tl_db:{...(face.tl_db || DEFAULT_ENCLOSURE_TL),[freq]:Number(e.target.value)}})}/></label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="rw-explainer">Si usas un Rw único, la app genera un espectro TL estimado por octavas. Si dispones de un espectro medido o certificado, selecciona “TL por bandas”: ese dato tiene prioridad.</div>
+            </div>
+          )}
+
+          {treatmentTab === 'examples' && (
+            <div className="treatment-example-grid">
+              <div className="example-card">
+                <div className="example-enclosure closed-example"><span>F</span></div>
+                <strong>Encierro completo</strong>
+                <p>Todas las caras están cerradas. La atenuación hacia cada receptor depende del TL/Rw de la superficie que enfrenta esa dirección.</p>
+              </div>
+              <div className="example-card active-example">
+                <div className="example-enclosure semi-example"><span>F</span><i>ABIERTO</i></div>
+                <strong>Semiencierro</strong>
+                <p>Una o más caras se dejan abiertas o parciales. La abertura se define por superficie, no por un porcentaje global ambiguo.</p>
+              </div>
+              <div className="example-card">
+                <div className="example-enclosure silencer-example"><span>F</span><b>⇢</b></div>
+                <strong>Encierro + silenciador</strong>
+                <p>El cerramiento se combina con una vía de ventilación cuya pérdida de inserción se define por bandas.</p>
+              </div>
+            </div>
+          )}
+
+          {treatmentTab === 'results' && (
+            <div className="treatment-results-layout">
+              <div className="treatment-summary-panel">
+                <strong>Comportamiento usado por el motor</strong>
+                {selectedObject.spectrum_mode === 'single' ? (
+                  <div className="single-control-result">
+                    <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
+                    <b>−{nominalSourceControlAttenuation(selectedObject, Number(selectedObject.single_frequency_hz || 500)).toFixed(1)} dB</b>
+                  </div>
+                ) : selectedObject.spectrum_mode === 'octaves' ? (
+                  <div className="rw-preview">
+                    {OCTAVE_BANDS.map(freq => <span key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><b>−{nominalSourceControlAttenuation(selectedObject,freq).toFixed(1)}</b></span>)}
+                  </div>
+                ) : (
+                  <div className="engine-note">En Broadband el tratamiento se evalúa a la frecuencia de cálculo del mapa ({frequency} Hz). Para revisar la respuesta completa por frecuencia, cambia la fuente a Octavas.</div>
+                )}
+              </div>
+              <div className="engine-note">Para encierros y semiencierros el valor final depende de la dirección Fuente–Receptor: el motor selecciona automáticamente Frente, Fondo, Izquierda o Derecha según el azimut del cerramiento.</div>
+            </div>
+          )}
+
+          {['direct','silencer'].includes(selectedObject.noise_control_type || 'none') && treatmentTab !== 'results' && (
+            <div className="treatment-panel simple-treatment-panel">
+              <h4>{selectedObject.noise_control_type === 'direct' ? 'Reducción directa por banda' : 'Pérdida de inserción del silenciador'}</h4>
+              <div className="face-spectrum-grid">
+                {OCTAVE_BANDS.map(freq => (
+                  <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
+                    <input type="number" min="0" max="80" step="0.5" value={selectedObject.noise_control_type === 'direct' ? (selectedObject.control_reduction_db?.[freq] ?? 0) : (selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq])}
+                      onChange={e => selectedObject.noise_control_type === 'direct'
+                        ? patchSelected({control_reduction_db:{...(selectedObject.control_reduction_db || DEFAULT_CONTROL_BANDS),[freq]:Number(e.target.value)}})
+                        : patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})
+                      }/>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(selectedObject.noise_control_type || 'none') === 'enclosure_silencer' && treatmentTab === 'surfaces' && (
+            <div className="treatment-panel silencer-vent-panel">
+              <h4>Ventilación con silenciador</h4>
               <label className="compact-field">Fracción de ventilación [%]
                 <input type="number" min="0" max="100" step="1" value={selectedObject.enclosure_vent_pct ?? 10} onChange={e => patchSelected({enclosure_vent_pct:Number(e.target.value)})}/>
               </label>
               <div className="face-spectrum-grid">
                 {OCTAVE_BANDS.map(freq => (
                   <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
-                    <input type="number" min="0" max="80" step="0.5" value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]}
-                      onChange={e => patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})}/>
+                    <input type="number" min="0" max="80" step="0.5" value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]} onChange={e => patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})}/>
                   </label>
                 ))}
               </div>
-            </>
-          )}
-
-          {(selectedObject.noise_control_type || 'none') !== 'none' && (
-            <div className="treatment-summary-panel">
-              <strong>Comportamiento usado por el motor</strong>
-              {selectedObject.spectrum_mode === 'single' ? (
-                <div className="single-control-result">
-                  <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
-                  <b>−{nominalSourceControlAttenuation(selectedObject, Number(selectedObject.single_frequency_hz || 500)).toFixed(1)} dB</b>
-                </div>
-              ) : selectedObject.spectrum_mode === 'octaves' ? (
-                <div className="rw-preview">
-                  {OCTAVE_BANDS.map(freq => <span key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><b>−{nominalSourceControlAttenuation(selectedObject,freq).toFixed(1)}</b></span>)}
-                </div>
-              ) : (
-                <div className="engine-note">
-                  Broadband ya no usa una “reducción global declarada”. El control se evalúa a la frecuencia de cálculo del mapa ({frequency} Hz). Para análisis espectral completo, use Octavas.
-                </div>
-              )}
-              {['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') && (
-                <small>El resumen usa la cara Frente como referencia. El cálculo real selecciona Frente/Fondo/Izquierda/Derecha según la posición de cada receptor.</small>
-              )}
             </div>
           )}
+
+          <div className="treatment-dialog-footer">
+            <button className="secondary" type="button" onClick={() => setControlEditorOpen(false)}>Cerrar</button>
+          </div>
         </div>
       )}
 
