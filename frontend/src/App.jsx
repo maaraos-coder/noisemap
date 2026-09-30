@@ -617,6 +617,23 @@ function App() {
     }
   }
 
+  const runSelectedPairCut = async () => {
+    const source = sources.find(item => item.id === distanceSourceId)
+    const receiver = receivers.find(item => item.id === distanceReceiverId)
+    if (!source || !receiver) {
+      setCutError('Selecciona primero una fuente y un receptor en Dist. F–R.')
+      setCutOpen(true)
+      return
+    }
+
+    const startPoint = [Number(source.lat), Number(source.lon)]
+    const endPoint = [Number(receiver.lat), Number(receiver.lon)]
+    setCutStart(startPoint)
+    setCutEnd(endPoint)
+    setMode('navigate')
+    await runAcousticCut(startPoint, endPoint)
+  }
+
   const runAcousticCut = async (startPoint = cutStart, endPoint = cutEnd) => {
     if (!startPoint || !endPoint) return
 
@@ -1871,6 +1888,53 @@ function App() {
       }
     })
 
+    const selectedCutSource = sources.find(item => item.id === distanceSourceId)
+    const selectedCutReceiver = receivers.find(item => item.id === distanceReceiverId)
+    if (selectedCutSource && selectedCutReceiver) {
+      const srcProj = projectToCut(selectedCutSource.lat, selectedCutSource.lon)
+      const recProj = projectToCut(selectedCutReceiver.lat, selectedCutReceiver.lon)
+      const srcTerrainIndex = Math.min(
+        terrain.length - 1,
+        Math.max(0, Math.round(srcProj.t * Math.max(terrain.length - 1, 0)))
+      )
+      const recTerrainIndex = Math.min(
+        terrain.length - 1,
+        Math.max(0, Math.round(recProj.t * Math.max(terrain.length - 1, 0)))
+      )
+      const srcGround = terrain[srcTerrainIndex]?.elevation_m ?? zMin
+      const recGround = terrain[recTerrainIndex]?.elevation_m ?? zMin
+      const sx = margin.left + srcProj.t * plotW
+      const sy = yFor(Number(srcGround) + Number(selectedCutSource.height_m || 0))
+      const rx = margin.left + recProj.t * plotW
+      const ry = yFor(Number(recGround) + Number(selectedCutReceiver.height_m || 0))
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.moveTo(sx, sy)
+      ctx.lineTo(rx, ry)
+      ctx.strokeStyle = 'rgba(55,65,81,.72)'
+      ctx.lineWidth = 1.6
+      ctx.setLineDash([6, 5])
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      const mx = (sx + rx) / 2
+      const my = (sy + ry) / 2
+      const horizontal = haversineMeters(
+        selectedCutSource.lat,
+        selectedCutSource.lon,
+        selectedCutReceiver.lat,
+        selectedCutReceiver.lon
+      )
+      ctx.fillStyle = 'rgba(255,255,255,.92)'
+      ctx.fillRect(mx - 28, my - 9, 56, 17)
+      ctx.fillStyle = '#374151'
+      ctx.font = '700 9px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(`${horizontal.toFixed(1)} m`, mx, my + 3)
+      ctx.restore()
+    }
+
     // Building solids intersected by the A-B cut.
     const sampleCount = 180
     buildings.filter(building => building.enabled && building.points?.length >= 3).forEach(building => {
@@ -3030,11 +3094,23 @@ function App() {
           )}
 
           {distanceMode === 'selected' && distancePairs[0] && (
-            <div className="distance-result-card">
-              <div><span>Distancia horizontal</span><strong>{distancePairs[0].horizontal.toFixed(2)} m</strong></div>
-              <div><span>Distancia geométrica 3D*</span><strong>{distancePairs[0].distance3d.toFixed(2)} m</strong></div>
-              <small>*Considera las alturas configuradas de F y R; la línea visible muestra la distancia horizontal en planta.</small>
-            </div>
+            <>
+              <div className="distance-result-card">
+                <div><span>Distancia horizontal</span><strong>{distancePairs[0].horizontal.toFixed(2)} m</strong></div>
+                <div><span>Distancia geométrica 3D*</span><strong>{distancePairs[0].distance3d.toFixed(2)} m</strong></div>
+                <small>*Considera las alturas configuradas de F y R; la línea visible muestra la distancia horizontal en planta.</small>
+              </div>
+              <button
+                type="button"
+                className="distance-cut-button"
+                onClick={() => {
+                  setDistanceOpen(false)
+                  runSelectedPairCut()
+                }}
+              >
+                ▥ Ver corte F–R
+              </button>
+            </>
           )}
 
           {distanceMode === 'all' && (
@@ -3217,7 +3293,11 @@ function App() {
           <div className="dialog-header">
             <div>
               <span className="eyebrow">VISUALIZACIÓN</span>
-              <h3>Corte acústico A–B</h3>
+              <h3>
+                {distanceSourceId && distanceReceiverId
+                  ? `Corte F–R · ${sources.find(item => item.id === distanceSourceId)?.name || 'Fuente'} → ${receivers.find(item => item.id === distanceReceiverId)?.name || 'Receptor'}`
+                  : 'Corte acústico A–B'}
+              </h3>
             </div>
             <button onClick={() => {
               setCutOpen(false)
@@ -3228,7 +3308,7 @@ function App() {
             }}>×</button>
           </div>
 
-          <div className="cut-toolbar">
+          <div className="cut-toolbar cut-toolbar-pair">
             <label>
               Altura adicional
               <div>
@@ -3253,6 +3333,15 @@ function App() {
             </button>
             <button
               type="button"
+              className="cut-pair-button"
+              disabled={!distanceSourceId || !distanceReceiverId || cutLoading}
+              onClick={runSelectedPairCut}
+              title="Generar automáticamente el corte entre la fuente y receptor seleccionados"
+            >
+              Corte F–R
+            </button>
+            <button
+              type="button"
               className="cut-new-button"
               onClick={() => {
                 setCutOpen(false)
@@ -3263,7 +3352,7 @@ function App() {
                 setMode('cut')
               }}
             >
-              Nuevo corte
+              Corte libre
             </button>
           </div>
 
@@ -3294,7 +3383,7 @@ function App() {
               </div>
 
               <div className="engine-note">
-                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro, los edificios interceptados por el corte como sólidos, las fuentes en rojo y los receptores en azul. Los objetos alejados más de 8 m del plano A–B no se muestran, salvo la pareja F–R seleccionada, que se proyecta al corte e indica su offset lateral.
+                Vista de sección transversal: no modifica el proyecto. Con “Corte F–R” la sección se genera automáticamente entre la fuente y el receptor seleccionados, mostrando ambos a su altura real, la propagación por colores, terreno, edificios y barreras interceptadas.
               </div>
             </>
           )}
