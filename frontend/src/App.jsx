@@ -1234,6 +1234,13 @@ function App() {
     setBarrierStart(null)
     setBarrierHover(null)
     setLineStart(null)
+    if (mode === 'cut') {
+      setCutStart(null)
+      setCutEnd(null)
+      setCutResult(null)
+      setCutError('')
+      setCutOpen(false)
+    }
     setMode('navigate')
   }
 
@@ -1932,7 +1939,7 @@ function App() {
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
 
       if (event.key === 'Escape') {
-        if (barrierStart || lineStart || draftPolygon.length || buildingDraft.length || contourDraft.length || roadDraft.length) {
+        if (barrierStart || lineStart || draftPolygon.length || buildingDraft.length || contourDraft.length || roadDraft.length || (mode === 'cut' && cutStart)) {
           cancelDrawing()
         } else if (selected) {
           setSelected(null)
@@ -3104,6 +3111,95 @@ function App() {
                 <small key={index}>{warning}</small>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {cutOpen && (
+        <div className="floating-dialog acoustic-cut-dialog">
+          <div className="dialog-header">
+            <div>
+              <span className="eyebrow">VISUALIZACIÓN</span>
+              <h3>Corte acústico A–B</h3>
+            </div>
+            <button onClick={() => {
+              setCutOpen(false)
+              setCutStart(null)
+              setCutEnd(null)
+              setCutResult(null)
+              setCutError('')
+            }}>×</button>
+          </div>
+
+          <div className="cut-toolbar">
+            <label>
+              Altura adicional
+              <div>
+                <input
+                  type="number"
+                  min="5"
+                  max="300"
+                  step="1"
+                  value={cutMaxHeight}
+                  onChange={e => setCutMaxHeight(Math.max(5, Math.min(300, Number(e.target.value) || 30)))}
+                />
+                <span>m</span>
+              </div>
+            </label>
+            <button
+              type="button"
+              className="profile-open-button"
+              disabled={!cutStart || !cutEnd || cutLoading}
+              onClick={() => runAcousticCut()}
+            >
+              {cutLoading ? 'Calculando…' : 'Actualizar corte'}
+            </button>
+            <button
+              type="button"
+              className="cut-new-button"
+              onClick={() => {
+                setCutOpen(false)
+                setCutStart(null)
+                setCutEnd(null)
+                setCutResult(null)
+                setCutError('')
+                setMode('cut')
+              }}
+            >
+              Nuevo corte
+            </button>
+          </div>
+
+          {cutLoading && (
+            <div className="cut-loading">Calculando distribución vertical de niveles…</div>
+          )}
+
+          {cutError && (
+            <div className="topo-import-result error">{cutError}</div>
+          )}
+
+          {cutResult && !cutLoading && (
+            <>
+              <div className="cut-summary">
+                <div><span>Longitud A–B</span><strong>{Number(cutResult.distance_m).toFixed(1)} m</strong></div>
+                <div><span>Rango vertical</span><strong>{Number(cutResult.z_min_m).toFixed(1)}–{Number(cutResult.z_max_m).toFixed(1)} m</strong></div>
+                <div><span>Niveles</span><strong>{cutResult.min_level != null ? Number(cutResult.min_level).toFixed(1) : '—'}–{cutResult.max_level != null ? Number(cutResult.max_level).toFixed(1) : '—'} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</strong></div>
+              </div>
+
+              <div className="cut-canvas-wrap">
+                <canvas ref={cutCanvasRef} aria-label="Mapa de ruido en corte vertical A–B" />
+              </div>
+
+              <div className="cut-legend-row">
+                <span>{vmin.toFixed(0)}</span>
+                <div className="cut-gradient" />
+                <span>{vmax.toFixed(0)} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</span>
+              </div>
+
+              <div className="engine-note">
+                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro y los edificios interceptados por el corte como sólidos. Los colores representan el nivel calculado en cada punto del plano vertical.
+              </div>
+            </>
           )}
         </div>
       )}
