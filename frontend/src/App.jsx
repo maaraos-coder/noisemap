@@ -284,6 +284,12 @@ const OCTAVE_BANDS = [63,125,250,500,1000,2000,4000,8000]
 const DEFAULT_CONTROL_BANDS = {63:0,125:0,250:0,500:0,1000:0,2000:0,4000:0,8000:0}
 const DEFAULT_ENCLOSURE_TL = {63:10,125:15,250:20,500:25,1000:30,2000:35,4000:35,8000:35}
 const DEFAULT_SILENCER_IL = {63:3,125:6,250:10,500:15,1000:20,2000:22,4000:20,8000:16}
+const ENCLOSURE_ABSORPTION_PRESETS = {
+  unlined:{63:0.02,125:0.02,250:0.03,500:0.04,1000:0.05,2000:0.05,4000:0.05,8000:0.05},
+  low:{63:0.04,125:0.06,250:0.10,500:0.16,1000:0.22,2000:0.28,4000:0.30,8000:0.30},
+  medium:{63:0.08,125:0.15,250:0.30,500:0.50,1000:0.65,2000:0.75,4000:0.80,8000:0.80},
+  high:{63:0.15,125:0.30,250:0.55,500:0.72,1000:0.84,2000:0.90,4000:0.92,8000:0.92}
+}
 const ENCLOSURE_FACES = [
   ['front','Frente'], ['back','Fondo'], ['left','Izquierda'],
   ['right','Derecha'], ['roof','Techo'], ['floor','Piso']
@@ -306,9 +312,17 @@ function bandValue(values, freq, fallback = 0) {
 }
 
 function estimatedTlFromRw(rw, freq) {
-  const offsets = {63:-20,125:-14,250:-8,500:-3,1000:0,2000:3,4000:5,8000:6}
-  const nearest = OCTAVE_BANDS.reduce((a,b) => Math.abs(b-freq) < Math.abs(a-freq) ? b : a, OCTAVE_BANDS[0])
-  return Math.max(0, Number(rw || 0) + offsets[nearest])
+  const offsets = {63:-25,125:-16,250:-7,500:0,1000:3,2000:4,4000:4,8000:4}
+  const bands = OCTAVE_BANDS
+  const f = Math.max(Number(freq || 500), 1)
+  if (f <= bands[0]) return Math.max(0, Number(rw || 0) + offsets[bands[0]])
+  if (f >= bands[bands.length-1]) return Math.max(0, Number(rw || 0) + offsets[bands[bands.length-1]])
+  let i = 0
+  while (i < bands.length - 1 && f > bands[i+1]) i++
+  const f0=bands[i], f1=bands[i+1]
+  const t=(Math.log(f)-Math.log(f0))/(Math.log(f1)-Math.log(f0))
+  const off=offsets[f0]+t*(offsets[f1]-offsets[f0])
+  return Math.max(0, Number(rw || 0) + off)
 }
 
 function enclosureFaceForBearing(source, bearing) {
@@ -840,6 +854,10 @@ function App() {
         enclosure_azimuth_deg: 0,
         enclosure_rw_db: 30,
         enclosure_faces: defaultEnclosureFaces(),
+        enclosure_lining_mode: 'unlined',
+        enclosure_absorption_coeff: { ...ENCLOSURE_ABSORPTION_PRESETS.unlined },
+        enclosure_vent_area_m2: 0.10,
+        enclosure_vent_face: 'back',
         semi_opening_pct: 25,
         semi_opening_azimuth_deg: 0,
         semi_opening_angle_deg: 90
@@ -4315,7 +4333,7 @@ function App() {
               )}
 
               <div className="engine-note">
-                El motor V4 propaga las fuentes en octavas banda por banda. Single se calcula a su frecuencia y Broadband permanece como nivel global LwA sin inventar un espectro.
+                El motor V4 propaga por frecuencia. Los encierros se resuelven mediante balance energético de superficies, absorción interior y radiación direccional; Single usa su frecuencia real y Broadband permanece como LwA sin inventar un espectro.
               </div>
             </>
           )}
@@ -4843,6 +4861,36 @@ function App() {
                 })()}
                 <div className="orientation-note">La cara “Frente” es la referencia angular del encierro. Al girar el azimut, también cambia qué superficie queda enfrentada a cada receptor.</div>
               </section>
+
+              <section className="treatment-panel lining-panel">
+                <h4>Absorción interior</h4>
+                <label className="compact-field">Revestimiento
+                  <select value={selectedObject.enclosure_lining_mode || 'unlined'} onChange={e => {
+                    const mode=e.target.value
+                    patchSelected({
+                      enclosure_lining_mode:mode,
+                      enclosure_absorption_coeff:mode === 'custom'
+                        ? (selectedObject.enclosure_absorption_coeff || {...ENCLOSURE_ABSORPTION_PRESETS.unlined})
+                        : {...ENCLOSURE_ABSORPTION_PRESETS[mode]}
+                    })
+                  }}>
+                    <option value="unlined">Sin revestimiento</option>
+                    <option value="low">Absorción baja</option>
+                    <option value="medium">Absorción media</option>
+                    <option value="high">Absorción alta</option>
+                    <option value="custom">Personalizada por bandas</option>
+                  </select>
+                </label>
+                <div className="absorption-preview">
+                  {OCTAVE_BANDS.map(freq => {
+                    const coeff=(selectedObject.enclosure_lining_mode || 'unlined') === 'custom'
+                      ? Number(selectedObject.enclosure_absorption_coeff?.[freq] ?? 0)
+                      : Number(ENCLOSURE_ABSORPTION_PRESETS[selectedObject.enclosure_lining_mode || 'unlined']?.[freq] ?? 0)
+                    return <label key={freq}><small>{freq>=1000?freq/1000+'k':freq}</small><input type="number" min="0" max="0.99" step="0.01" disabled={(selectedObject.enclosure_lining_mode || 'unlined') !== 'custom'} value={coeff.toFixed(2)} onChange={e => patchSelected({enclosure_absorption_coeff:{...(selectedObject.enclosure_absorption_coeff || {}),[freq]:Number(e.target.value)}})}/></label>
+                  })}
+                </div>
+                <div className="orientation-note">Estos coeficientes representan la absorción acústica del revestimiento interior. Los presets son genéricos de diseño, no certificados de material.</div>
+              </section>
             </div>
           )}
 
@@ -4902,22 +4950,34 @@ function App() {
 
           {treatmentTab === 'results' && (
             <div className="treatment-results-layout">
-              <div className="treatment-summary-panel">
-                <strong>Comportamiento usado por el motor</strong>
-                {selectedObject.spectrum_mode === 'single' ? (
-                  <div className="single-control-result">
-                    <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
-                    <b>−{nominalSourceControlAttenuation(selectedObject, Number(selectedObject.single_frequency_hz || 500)).toFixed(1)} dB</b>
+              {['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') ? (
+                <>
+                  <div className="treatment-summary-panel">
+                    <strong>Modelo físico del cerramiento</strong>
+                    <div className="physics-flow">
+                      <span>Lw fuente</span><b>→</b><span>campo interior</span><b>→</b><span>absorción + transmisión + aberturas</span><b>→</b><span>potencia por cada cara</span><b>→</b><span>propagación exterior</span>
+                    </div>
+                    <small>Las dimensiones, áreas, R/TL, aberturas, revestimiento interior y ventilación participan ahora en el balance energético. Cada superficie radia con una directividad continua respecto de su normal.</small>
                   </div>
-                ) : selectedObject.spectrum_mode === 'octaves' ? (
-                  <div className="rw-preview">
-                    {OCTAVE_BANDS.map(freq => <span key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><b>−{nominalSourceControlAttenuation(selectedObject,freq).toFixed(1)}</b></span>)}
+                  <div className="engine-note">
+                    El nivel final depende del receptor y no se resume correctamente con un único “−dB” de control. Revísalo en el receptor o recalculando el mapa.
                   </div>
-                ) : (
-                  <div className="engine-note">En Broadband el tratamiento se evalúa a la frecuencia de cálculo del mapa ({frequency} Hz). Para revisar la respuesta completa por frecuencia, cambia la fuente a Octavas.</div>
-                )}
-              </div>
-              <div className="engine-note">Para encierros y semiencierros el valor final depende de la dirección Fuente–Receptor: el motor selecciona automáticamente Frente, Fondo, Izquierda o Derecha según el azimut del cerramiento.</div>
+                </>
+              ) : (
+                <div className="treatment-summary-panel">
+                  <strong>Comportamiento usado por el motor</strong>
+                  {selectedObject.spectrum_mode === 'single' ? (
+                    <div className="single-control-result">
+                      <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
+                      <b>−{nominalSourceControlAttenuation(selectedObject, Number(selectedObject.single_frequency_hz || 500)).toFixed(1)} dB</b>
+                    </div>
+                  ) : (
+                    <div className="rw-preview">
+                      {OCTAVE_BANDS.map(freq => <span key={freq}><small>{freq >= 1000 ? freq/1000+'k' : freq}</small><b>−{nominalSourceControlAttenuation(selectedObject,freq).toFixed(1)}</b></span>)}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -4941,9 +5001,17 @@ function App() {
           {(selectedObject.noise_control_type || 'none') === 'enclosure_silencer' && treatmentTab === 'surfaces' && (
             <div className="treatment-panel silencer-vent-panel">
               <h4>Ventilación con silenciador</h4>
-              <label className="compact-field">Fracción de ventilación [%]
-                <input type="number" min="0" max="100" step="1" value={selectedObject.enclosure_vent_pct ?? 10} onChange={e => patchSelected({enclosure_vent_pct:Number(e.target.value)})}/>
-              </label>
+              <div className="vent-geometry-grid">
+                <label className="compact-field">Área de abertura [m²]
+                  <input type="number" min="0" step="0.01" value={selectedObject.enclosure_vent_area_m2 ?? 0.10} onChange={e => patchSelected({enclosure_vent_area_m2:Number(e.target.value)})}/>
+                </label>
+                <label className="compact-field">Superficie donde se ubica
+                  <select value={selectedObject.enclosure_vent_face || 'back'} onChange={e => patchSelected({enclosure_vent_face:e.target.value})}>
+                    {ENCLOSURE_FACES.map(([key,label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="orientation-note">El área de ventilación se descuenta de la superficie seleccionada y se modela como una vía independiente con la pérdida de inserción del silenciador.</div>
               <div className="face-spectrum-grid">
                 {OCTAVE_BANDS.map(freq => (
                   <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
