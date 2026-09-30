@@ -2120,17 +2120,24 @@ function App() {
             longitude={lon}
             latitude={lat}
             anchor="center"
+            draggable
+            onDragEnd={e => {
+              const { lat: newLat, lng: newLon } = e.lngLat
+              setDraftPolygon(prev =>
+                prev.map((point, i) => i === index ? [newLat, newLon] : point)
+              )
+            }}
             onClick={e => e.originalEvent.stopPropagation()}
           >
             <div
               className={`area-draft-vertex ${index === 0 ? 'first' : ''}`}
-              title={index === 0 ? 'Inicio del área de cálculo' : `Vértice ${index + 1}`}
+              title={index === 0 ? 'Inicio del área de cálculo · arrastra para mover' : `Vértice ${index + 1} · arrastra para mover`}
             >
               <span>{index + 1}</span>
               {index === 0 && <b>INICIO</b>}
             </div>
           </Marker>
-        ))}
+        )))}
 
         {mode === 'barrier' && barrierStart && barrierHover && (
           <Source id="barrier-preview" type="geojson" data={barrierPreviewData}>
