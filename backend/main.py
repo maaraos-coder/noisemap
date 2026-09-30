@@ -127,6 +127,34 @@ def _dict_band_value(values: Dict[str, float], band_hz: float, default: float = 
             return v0 + t * (v1 - v0)
     return float(default)
 
+def _dict_band_value_signed(values: Dict[str, float], band_hz: float, default: float = 0.0) -> float:
+    """Log-frequency interpolation that preserves signed spectral offsets."""
+    if not values:
+        return float(default)
+    pts = []
+    for band in OCTAVE_BANDS:
+        raw = values.get(str(band), values.get(band))
+        if raw is None:
+            continue
+        try:
+            pts.append((float(band), float(raw)))
+        except (TypeError, ValueError):
+            continue
+    if not pts:
+        return float(default)
+    f = max(float(band_hz), 1e-6)
+    pts.sort()
+    if f <= pts[0][0]:
+        return pts[0][1]
+    if f >= pts[-1][0]:
+        return pts[-1][1]
+    for (f0, v0), (f1, v1) in zip(pts, pts[1:]):
+        if f0 <= f <= f1:
+            t = (math.log(f) - math.log(f0)) / max(math.log(f1) - math.log(f0), 1e-12)
+            return v0 + t * (v1 - v0)
+    return float(default)
+
+
 
 def _a_weighting_correction_db(frequency_hz: float) -> float:
     """IEC-style analytical A-weighting correction for an arbitrary frequency."""
@@ -173,7 +201,7 @@ def _rw_estimated_tl_db(rw_db: float, band_hz: float) -> float:
         "4000": 4.0,
         "8000": 4.0,
     }
-    return max(0.0, rw + _dict_band_value(offsets, band_hz, 0.0))
+    return max(0.0, rw + _dict_band_value_signed(offsets, band_hz, 0.0))
 
 
 ENCLOSURE_ABSORPTION_PRESETS = {
