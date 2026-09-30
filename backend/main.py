@@ -677,6 +677,20 @@ class ReceiverPreviewRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
+class AcousticCutRequest(BaseModel):
+    sources: List[SourceIn] = []
+    roads: List[RoadIn] = []
+    barriers: List[BarrierIn] = []
+    buildings: List[BuildingIn] = []
+    contours: List[ContourIn] = []
+    start: List[float]
+    end: List[float]
+    max_height_m: float = Field(default=30.0, gt=1.0, le=300.0)
+    horizontal_samples: int = Field(default=56, ge=20, le=100)
+    vertical_samples: int = Field(default=32, ge=12, le=80)
+    settings: GridSettings = GridSettings()
+
+
 def _barriers_with_buildings(
     barrier_inputs: List[BarrierIn],
     buildings: List[BuildingIn],
@@ -1117,6 +1131,126 @@ def geocode(q: str):
     }
 
 
+
+
+@app.post("/api/acoustic-cut")
+def acoustic_cut(payload: AcousticCutRequest):
+    if len(payload.start) < 2 or len(payload.end) < 2:
+        raise HTTPException(status_code=400, detail="El corte necesita un punto A y un punto B.")
+
+    lat_a, lon_a = float(payload.start[0]), float(payload.start[1])
+    lat_b, lon_b = float(payload.end[0]), float(payload.end[1])
+    lat0 = (lat_a + lat_b) / 2.0
+    lon0 = (lon_a + lon_b) / 2.0
+
+    ax, ay = latlon_to_xy(lat_a, lon_a, lat0, lon0)
+    bx, by = latlon_to_xy(lat_b, lon_b, lat0, lon0)
+    total_distance = math.hypot(bx - ax, by - ay)
+    if total_distance < 1.0:
+        raise HTTPException(status_code=400, detail="Los puntos A y B del corte están demasiado cerca.")
+
+    all_sources = _expand_sources(
+        payload.sources, payload.roads, payload.settings.temperature_c
+    )
+
+    terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
+    source_ground_elevations = {
+        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        for source in all_sources
+    }
+    barriers = _barriers_with_buildings(
+        payload.barriers,
+        payload.buildings,
+        terrain_samples,
+        lat0,
+        lon0,
+    )
+
+    settings = PropagationSettings(
+        alpha_db_per_km=payload.settings.alpha_db_per_km,
+        frequency_hz=payload.settings.frequency_hz,
+        max_barrier_db=payload.settings.max_barrier_db,
+        temperature_c=payload.settings.temperature_c,
+        humidity_pct=payload.settings.humidity_pct,
+        ground_factor=payload.settings.ground_factor,
+        reflections_enabled=payload.settings.reflections_enabled,
+    )
+    settings.a_weighting = payload.settings.a_weighting
+
+    horizontal = []
+    terrain_profile = []
+    for i in range(payload.horizontal_samples):
+        t = i / max(payload.horizontal_samples - 1, 1)
+        lat = lat_a + (lat_b - lat_a) * t
+        lon = lon_a + (lon_b - lon_a) * t
+        ground = _terrain_elevation(terrain_samples, lat, lon, lat0, lon0)
+        horizontal.append((t, lat, lon, ground))
+        terrain_profile.append({
+            "distance_m": round(total_distance * t, 3),
+            "elevation_m": round(float(ground), 3),
+        })
+
+    min_ground = min(item[3] for item in horizontal)
+    max_ground = max(item[3] for item in horizontal)
+    z_min = min_ground
+    z_max = max_ground + float(payload.max_height_m)
+    z_values = np.linspace(z_min, z_max, payload.vertical_samples)
+
+    levels = []
+    finite = []
+    # Return top -> bottom to paint directly to canvas/SVG.
+    for z_abs in reversed(z_values):
+        row = []
+        for _, lat, lon, ground in horizontal:
+            receiver_height = float(z_abs) - float(ground)
+            if receiver_height <= 0.05:
+                row.append(None)
+                continue
+
+            inside_solid = False
+            for building in payload.buildings:
+                if (
+                    building.enabled
+                    and len(building.points) >= 3
+                    and point_in_polygon(lat, lon, building.points)
+                    and z_abs <= ground + float(building.height_m)
+                ):
+                    inside_solid = True
+                    break
+            if inside_solid:
+                row.append(None)
+                continue
+
+            value = _combined_spectral_level_at_point(
+                all_sources,
+                lat,
+                lon,
+                receiver_height,
+                barriers,
+                settings,
+                lat0,
+                lon0,
+                terrain_samples=terrain_samples,
+                receiver_ground_elevation_m=ground,
+                source_ground_elevations=source_ground_elevations,
+            )
+            if np.isfinite(value):
+                value_f = round(float(value), 3)
+                finite.append(value_f)
+                row.append(value_f)
+            else:
+                row.append(None)
+        levels.append(row)
+
+    return {
+        "distance_m": round(total_distance, 3),
+        "z_min_m": round(float(z_min), 3),
+        "z_max_m": round(float(z_max), 3),
+        "levels": levels,
+        "terrain_profile": terrain_profile,
+        "min_level": min(finite) if finite else None,
+        "max_level": max(finite) if finite else None,
+    }
 
 
 @app.post("/api/receiver-preview")
