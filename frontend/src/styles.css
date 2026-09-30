@@ -3431,3 +3431,50 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.cut-pair-selector {
+  display: grid;
+  grid-template-columns: minmax(180px,1fr) 24px minmax(180px,1fr) minmax(170px,.9fr);
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #dce4eb;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+.cut-pair-selector label {
+  color: #596876;
+  font-size: 9px;
+  font-weight: 800;
+}
+.cut-pair-selector select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 9px;
+  border: 1px solid #cbd5df;
+  border-radius: 7px;
+  background: #fff;
+}
+.cut-pair-arrow {
+  align-self: center;
+  justify-self: center;
+  margin-top: 16px;
+  color: #657381;
+  font-size: 18px;
+  font-weight: 900;
+}
+.cut-endpoint.source {
+  background: #d93648;
+}
+.cut-endpoint.receiver {
+  background: #0b63ce;
+}
+@media (max-width: 900px) {
+  .cut-pair-selector {
+    grid-template-columns: 1fr;
+  }
+  .cut-pair-arrow {
+    display: none;
+  }
+}
