@@ -2274,6 +2274,65 @@ function App() {
           </Source>
         )}
 
+
+        {distanceMode !== 'off' && distancePairs.length > 0 && (
+          <Source id="distance-fr-lines" type="geojson" data={distanceData}>
+            <Layer
+              id="distance-fr-line"
+              type="line"
+              paint={{
+                'line-color': '#1f2937',
+                'line-width': distanceMode === 'selected' ? 2.4 : 1.2,
+                'line-opacity': distanceMode === 'selected' ? 0.85 : 0.45,
+                'line-dasharray': [2, 1.5]
+              }}
+            />
+          </Source>
+        )}
+
+        {distanceMode !== 'off' && distancePairs.slice(0, distanceMode === 'all' ? 40 : 1).map(pair => (
+          <Marker
+            key={`distance-label-${pair.id}`}
+            longitude={(Number(pair.source.lon) + Number(pair.receiver.lon)) / 2}
+            latitude={(Number(pair.source.lat) + Number(pair.receiver.lat)) / 2}
+            anchor="center"
+          >
+            <div className={`distance-fr-label ${distanceMode === 'all' ? 'compact' : ''}`}>
+              <strong>{pair.horizontal.toFixed(1)} m</strong>
+              {distanceMode === 'selected' && (
+                <span>{pair.source.name} ↔ {pair.receiver.name}</span>
+              )}
+            </div>
+          </Marker>
+        ))}
+
+        {cutStart && (
+          <Marker longitude={cutStart[1]} latitude={cutStart[0]} anchor="center">
+            <div className="cut-endpoint">A</div>
+          </Marker>
+        )}
+
+        {cutEnd && (
+          <Marker longitude={cutEnd[1]} latitude={cutEnd[0]} anchor="center">
+            <div className="cut-endpoint">B</div>
+          </Marker>
+        )}
+
+        {cutStart && cutEnd && (
+          <Source id="acoustic-cut-line" type="geojson" data={cutLineData}>
+            <Layer
+              id="acoustic-cut-line-layer"
+              type="line"
+              paint={{
+                'line-color': '#111827',
+                'line-width': 2.5,
+                'line-dasharray': [3, 1.5],
+                'line-opacity': 0.9
+              }}
+            />
+          </Source>
+        )}
+
         {layers.buildings && buildings.map(building => {
           if (!building.enabled || !building.points?.length) return null
           const lat = building.points.reduce((sum, p) => sum + Number(p[0]), 0) / building.points.length
