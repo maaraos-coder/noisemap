@@ -438,6 +438,9 @@ function App() {
   const [cutLoading, setCutLoading] = useState(false)
   const [cutError, setCutError] = useState('')
   const [cutMaxHeight, setCutMaxHeight] = useState(30)
+  const [cutModeType, setCutModeType] = useState('pair')
+  const [cutSourceId, setCutSourceId] = useState('')
+  const [cutReceiverId, setCutReceiverId] = useState('')
   const [searchOpen, setSearchOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topographyImportOpen, setTopographyImportOpen] = useState(false)
@@ -618,13 +621,21 @@ function App() {
   }
 
   const runSelectedPairCut = async () => {
-    const source = sources.find(item => item.id === distanceSourceId)
-    const receiver = receivers.find(item => item.id === distanceReceiverId)
+    const sourceId = cutSourceId || distanceSourceId
+    const receiverId = cutReceiverId || distanceReceiverId
+    const source = sources.find(item => item.id === sourceId)
+    const receiver = receivers.find(item => item.id === receiverId)
     if (!source || !receiver) {
-      setCutError('Selecciona primero una fuente y un receptor en Dist. F–R.')
+      setCutError('Selecciona una fuente y un receptor para generar la sección transversal.')
       setCutOpen(true)
       return
     }
+
+    setCutModeType('pair')
+    setCutSourceId(source.id)
+    setCutReceiverId(receiver.id)
+    setDistanceSourceId(source.id)
+    setDistanceReceiverId(receiver.id)
 
     const startPoint = [Number(source.lat), Number(source.lon)]
     const endPoint = [Number(receiver.lat), Number(receiver.lon)]
@@ -1828,7 +1839,7 @@ function App() {
     const cutToleranceM = 8
     sources.filter(item => item.enabled).forEach(source => {
       const projected = projectToCut(source.lat, source.lon)
-      const isSelectedPairSource = source.id === distanceSourceId
+      const isSelectedPairSource = source.id === (cutSourceId || distanceSourceId)
       if (projected.cross > cutToleranceM && !isSelectedPairSource) return
       const terrainIndex = Math.min(
         terrain.length - 1,
@@ -1859,7 +1870,7 @@ function App() {
 
     receivers.filter(item => item.visible !== false).forEach(receiver => {
       const projected = projectToCut(receiver.lat, receiver.lon)
-      const isSelectedPairReceiver = receiver.id === distanceReceiverId
+      const isSelectedPairReceiver = receiver.id === (cutReceiverId || distanceReceiverId)
       if (projected.cross > cutToleranceM && !isSelectedPairReceiver) return
       const terrainIndex = Math.min(
         terrain.length - 1,
@@ -1888,8 +1899,10 @@ function App() {
       }
     })
 
-    const selectedCutSource = sources.find(item => item.id === distanceSourceId)
-    const selectedCutReceiver = receivers.find(item => item.id === distanceReceiverId)
+    const activeCutSourceId = cutSourceId || distanceSourceId
+    const activeCutReceiverId = cutReceiverId || distanceReceiverId
+    const selectedCutSource = sources.find(item => item.id === activeCutSourceId)
+    const selectedCutReceiver = receivers.find(item => item.id === activeCutReceiverId)
     if (selectedCutSource && selectedCutReceiver) {
       const srcProj = projectToCut(selectedCutSource.lat, selectedCutSource.lon)
       const recProj = projectToCut(selectedCutReceiver.lat, selectedCutReceiver.lon)
@@ -2015,7 +2028,7 @@ function App() {
     ctx.fillText('A', margin.left + 4, margin.top + 15)
     ctx.textAlign = 'right'
     ctx.fillText('B', margin.left + plotW - 4, margin.top + 15)
-  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, distanceSourceId, distanceReceiverId, vmin, vmax])
+  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, cutSourceId, cutReceiverId, distanceSourceId, distanceReceiverId, vmin, vmax])
 
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
@@ -2468,13 +2481,13 @@ function App() {
 
         {cutStart && (
           <Marker longitude={cutStart[1]} latitude={cutStart[0]} anchor="center">
-            <div className="cut-endpoint">A</div>
+            <div className={`cut-endpoint ${cutModeType === 'pair' ? 'source' : ''}`}>{cutModeType === 'pair' ? 'F' : 'A'}</div>
           </Marker>
         )}
 
         {cutEnd && (
           <Marker longitude={cutEnd[1]} latitude={cutEnd[0]} anchor="center">
-            <div className="cut-endpoint">B</div>
+            <div className={`cut-endpoint ${cutModeType === 'pair' ? 'receiver' : ''}`}>{cutModeType === 'pair' ? 'R' : 'B'}</div>
           </Marker>
         )}
 
@@ -3010,8 +3023,11 @@ function App() {
             setCutEnd(null)
             setCutResult(null)
             setCutError('')
-            setCutOpen(false)
-            setMode('cut')
+            setCutModeType('pair')
+            setCutSourceId(distanceSourceId || sources.find(item => item.enabled)?.id || '')
+            setCutReceiverId(distanceReceiverId || receivers.find(item => item.visible !== false)?.id || '')
+            setCutOpen(true)
+            setMode('navigate')
             setDistanceOpen(false)
             setSearchOpen(false)
             setSettingsOpen(false)
@@ -3294,8 +3310,8 @@ function App() {
             <div>
               <span className="eyebrow">VISUALIZACIÓN</span>
               <h3>
-                {distanceSourceId && distanceReceiverId
-                  ? `Corte F–R · ${sources.find(item => item.id === distanceSourceId)?.name || 'Fuente'} → ${receivers.find(item => item.id === distanceReceiverId)?.name || 'Receptor'}`
+                {cutModeType === 'pair' && cutSourceId && cutReceiverId
+                  ? `Sección transversal F–R · ${sources.find(item => item.id === cutSourceId)?.name || 'Fuente'} → ${receivers.find(item => item.id === cutReceiverId)?.name || 'Receptor'}`
                   : 'Corte acústico A–B'}
               </h3>
             </div>
@@ -3306,6 +3322,50 @@ function App() {
               setCutResult(null)
               setCutError('')
             }}>×</button>
+          </div>
+
+          <div className="cut-pair-selector">
+            <label>
+              Fuente
+              <select
+                value={cutSourceId}
+                onChange={e => {
+                  setCutSourceId(e.target.value)
+                  setCutResult(null)
+                  setCutError('')
+                }}
+              >
+                <option value="">Seleccionar fuente</option>
+                {sources.filter(item => item.enabled).map(source => (
+                  <option key={source.id} value={source.id}>{source.name}</option>
+                ))}
+              </select>
+            </label>
+            <span className="cut-pair-arrow">→</span>
+            <label>
+              Receptor
+              <select
+                value={cutReceiverId}
+                onChange={e => {
+                  setCutReceiverId(e.target.value)
+                  setCutResult(null)
+                  setCutError('')
+                }}
+              >
+                <option value="">Seleccionar receptor</option>
+                {receivers.filter(item => item.visible !== false).map(receiver => (
+                  <option key={receiver.id} value={receiver.id}>{receiver.name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="cut-pair-button primary"
+              disabled={!cutSourceId || !cutReceiverId || cutLoading}
+              onClick={runSelectedPairCut}
+            >
+              {cutLoading ? 'Calculando…' : 'Generar sección F–R'}
+            </button>
           </div>
 
           <div className="cut-toolbar cut-toolbar-pair">
@@ -3333,15 +3393,6 @@ function App() {
             </button>
             <button
               type="button"
-              className="cut-pair-button"
-              disabled={!distanceSourceId || !distanceReceiverId || cutLoading}
-              onClick={runSelectedPairCut}
-              title="Generar automáticamente el corte entre la fuente y receptor seleccionados"
-            >
-              Corte F–R
-            </button>
-            <button
-              type="button"
               className="cut-new-button"
               onClick={() => {
                 setCutOpen(false)
@@ -3349,6 +3400,7 @@ function App() {
                 setCutEnd(null)
                 setCutResult(null)
                 setCutError('')
+                setCutModeType('free')
                 setMode('cut')
               }}
             >
