@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from pathlib import Path
@@ -116,24 +116,83 @@ def _angular_difference_deg(a: float, b: float) -> float:
     return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
 
 
+def _rw_estimated_tl_db(rw_db: float, band_hz: float) -> float:
+    """Approximate octave-band TL shape from a single Rw value.
+
+    This is intentionally labelled as an engineering estimate in the UI. It does
+    not replace a measured/certified spectrum. The curve is anchored at 500 Hz
+    and follows a conservative generic mass-law-like shape.
+    """
+    rw = max(0.0, float(rw_db or 0.0))
+    offsets = {
+        63: -20.0,
+        125: -14.0,
+        250: -8.0,
+        500: -3.0,
+        1000: 0.0,
+        2000: 3.0,
+        4000: 5.0,
+        8000: 6.0,
+    }
+    nearest = min(OCTAVE_BANDS, key=lambda b: abs(float(b) - float(band_hz)))
+    return max(0.0, rw + offsets[nearest])
+
+
+def _enclosure_face_name_for_receiver(source, receiver_lat: Optional[float], receiver_lon: Optional[float]) -> str:
+    """Return the vertical enclosure face crossed by the horizontal source-receiver ray."""
+    if receiver_lat is None or receiver_lon is None:
+        return "front"
+    bearing = _bearing_deg(source.lat, source.lon, receiver_lat, receiver_lon)
+    relative = (bearing - float(getattr(source, "enclosure_azimuth_deg", 0.0) or 0.0) + 360.0) % 360.0
+    if relative < 45.0 or relative >= 315.0:
+        return "front"
+    if relative < 135.0:
+        return "right"
+    if relative < 225.0:
+        return "back"
+    return "left"
+
+
+def _face_tl_db(source, face_name: str, band_hz: float) -> float:
+    faces = getattr(source, "enclosure_faces", None) or {}
+    face = faces.get(face_name) or {}
+    mode = str(face.get("acoustic_mode", "rw") or "rw").lower()
+    if mode == "spectrum":
+        return _dict_band_value(face.get("tl_db") or {}, band_hz)
+    return _rw_estimated_tl_db(float(face.get("rw_db", getattr(source, "enclosure_rw_db", 30.0)) or 0.0), band_hz)
+
+
+def _face_transmission_tau(source, face_name: str, band_hz: float) -> float:
+    faces = getattr(source, "enclosure_faces", None) or {}
+    face = faces.get(face_name) or {}
+    state = str(face.get("state", "closed") or "closed").lower()
+    if state == "open":
+        return 1.0
+
+    tl = _face_tl_db(source, face_name, band_hz)
+    tau_panel = 10.0 ** (-tl / 10.0)
+    if state == "partial":
+        opening = min(max(float(face.get("opening_pct", 25.0) or 0.0) / 100.0, 0.0), 1.0)
+        return (1.0 - opening) * tau_panel + opening
+    return tau_panel
+
+
 def _source_control_attenuation_db(
     source,
     band_hz: float,
     receiver_lat: Optional[float] = None,
     receiver_lon: Optional[float] = None,
 ) -> float:
-    """Equivalent attenuation of source-side control for one frequency band.
+    """Equivalent source-side attenuation for one frequency band.
 
-    Enclosures are represented by parallel acoustic transmission paths:
-    panel transmission, leaks/openings and, when present, a silenced ventilation path.
-    This is an engineering approximation for the educational propagation model.
+    Enclosures and semi-enclosures are resolved geometrically by the face that
+    lies in the source-receiver direction. Each face can be closed, open or
+    partially open and can use either a single Rw-derived spectrum or explicit
+    octave-band TL data.
     """
     kind = (getattr(source, "noise_control_type", "none") or "none").lower()
     if kind == "none":
         return 0.0
-
-    if (source.spectrum_mode or "broadband").lower() == "broadband":
-        return max(0.0, float(getattr(source, "control_global_db", 0.0) or 0.0))
 
     if kind == "direct":
         return _dict_band_value(source.control_reduction_db, band_hz)
@@ -141,44 +200,19 @@ def _source_control_attenuation_db(
     if kind == "silencer":
         return _dict_band_value(source.silencer_il_db, band_hz)
 
-    tl = _dict_band_value(source.enclosure_tl_db, band_hz)
-    tau_panel = 10.0 ** (-tl / 10.0)
+    if kind in ("enclosure", "semi", "enclosure_silencer"):
+        face_name = _enclosure_face_name_for_receiver(source, receiver_lat, receiver_lon)
+        tau = _face_transmission_tau(source, face_name, band_hz)
 
-    if kind == "enclosure":
-        leak = min(max(float(source.enclosure_leak_pct) / 100.0, 0.0), 1.0)
-        tau = (1.0 - leak) * tau_panel + leak
-        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
+        if kind == "enclosure_silencer":
+            vent = min(max(float(getattr(source, "enclosure_vent_pct", 0.0) or 0.0) / 100.0, 0.0), 1.0)
+            silencer_il = _dict_band_value(source.silencer_il_db, band_hz)
+            tau_silencer = 10.0 ** (-silencer_il / 10.0)
+            tau = (1.0 - vent) * tau + vent * tau_silencer
 
-    if kind == "semi":
-        opening = min(max(float(source.semi_opening_pct) / 100.0, 0.0), 1.0)
-        in_opening = True
-        if receiver_lat is not None and receiver_lon is not None:
-            bearing = _bearing_deg(source.lat, source.lon, receiver_lat, receiver_lon)
-            in_opening = _angular_difference_deg(
-                bearing, float(source.semi_opening_azimuth_deg)
-            ) <= float(source.semi_opening_angle_deg) / 2.0
-
-        # Within the aperture cone, direct radiation through the opening is
-        # combined energetically with transmission through the closed panels.
-        # Outside that cone, only the panel-transmitted path is used.
-        tau = ((1.0 - opening) * tau_panel + opening) if in_opening else tau_panel
-        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
-
-    if kind == "enclosure_silencer":
-        leak = min(max(float(source.enclosure_leak_pct) / 100.0, 0.0), 1.0)
-        vent = min(max(float(source.enclosure_vent_pct) / 100.0, 0.0), 1.0)
-        if leak + vent > 1.0:
-            scale = 1.0 / (leak + vent)
-            leak *= scale
-            vent *= scale
-        closed = max(0.0, 1.0 - leak - vent)
-        silencer_il = _dict_band_value(source.silencer_il_db, band_hz)
-        tau_silencer = 10.0 ** (-silencer_il / 10.0)
-        tau = closed * tau_panel + leak + vent * tau_silencer
         return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
 
     return 0.0
-
 
 def _settings_for_band(base, band_hz: float) -> PropagationSettings:
     alpha_db_per_km = (
@@ -676,12 +710,22 @@ class SourceIn(BaseModel):
     adjust_db: float = 0.0
     time_active_pct: float = 100.0
     noise_control_type: str = "none"
+    # Legacy field retained only for loading older saved projects; the current
+    # engine no longer uses a declared broadband reduction.
     control_global_db: float = Field(default=0.0, ge=0.0, le=80.0)
     control_reduction_db: Dict[str, float] = {}
     silencer_il_db: Dict[str, float] = {}
     enclosure_tl_db: Dict[str, float] = {}
     enclosure_leak_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     enclosure_vent_pct: float = Field(default=10.0, ge=0.0, le=100.0)
+    # Geometric enclosure / semi-enclosure model.
+    enclosure_length_m: float = Field(default=2.0, gt=0.0, le=1000.0)
+    enclosure_width_m: float = Field(default=2.0, gt=0.0, le=1000.0)
+    enclosure_height_m: float = Field(default=2.5, gt=0.0, le=1000.0)
+    enclosure_azimuth_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
+    enclosure_rw_db: float = Field(default=30.0, ge=0.0, le=100.0)
+    enclosure_faces: Dict[str, Dict[str, Any]] = {}
+    # Legacy semi-enclosure fields retained for backward-compatible project loads.
     semi_opening_pct: float = Field(default=25.0, ge=0.0, le=100.0)
     semi_opening_azimuth_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
     semi_opening_angle_deg: float = Field(default=90.0, gt=0.0, le=360.0)
