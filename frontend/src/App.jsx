@@ -351,7 +351,10 @@ function faceTransmissionAttenuation(source, faceName, freq) {
 function nominalSourceControlAttenuation(source, freq, faceName = 'front') {
   const kind = source.noise_control_type || 'none'
   if (kind === 'none') return 0
-  if (kind === 'direct') return bandValue(source.control_reduction_db, freq)
+  if (kind === 'direct') {
+    if (source.spectrum_mode === 'octaves') return bandValue(source.control_reduction_db, freq)
+    return Math.max(0, Number(source.control_direct_db ?? 0))
+  }
   if (kind === 'silencer') return bandValue(source.silencer_il_db, freq)
   if (['enclosure','semi','enclosure_silencer'].includes(kind)) {
     const faceAtt = faceTransmissionAttenuation(source, faceName, freq)
@@ -843,6 +846,7 @@ function App() {
         time_active_pct: 100,
         noise_control_type: 'none',
         control_global_db: 0,
+        control_direct_db: 0,
         control_reduction_db: { ...DEFAULT_CONTROL_BANDS },
         silencer_il_db: { ...DEFAULT_SILENCER_IL },
         enclosure_tl_db: { ...DEFAULT_ENCLOSURE_TL },
@@ -4966,10 +4970,15 @@ function App() {
               ) : (
                 <div className="treatment-summary-panel">
                   <strong>Comportamiento usado por el motor</strong>
-                  {selectedObject.spectrum_mode === 'single' ? (
+                  {selectedObject.spectrum_mode === 'broadband' ? (
+                    <div className="single-control-result">
+                      <span>Reducción global</span>
+                      <b>−{Number(selectedObject.control_direct_db ?? 0).toFixed(1)} dB</b>
+                    </div>
+                  ) : selectedObject.spectrum_mode === 'single' ? (
                     <div className="single-control-result">
                       <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
-                      <b>−{nominalSourceControlAttenuation(selectedObject, Number(selectedObject.single_frequency_hz || 500)).toFixed(1)} dB</b>
+                      <b>−{Number(selectedObject.control_direct_db ?? 0).toFixed(1)} dB</b>
                     </div>
                   ) : (
                     <div className="rw-preview">
@@ -4983,18 +4992,55 @@ function App() {
 
           {['direct','silencer'].includes(selectedObject.noise_control_type || 'none') && treatmentTab !== 'results' && (
             <div className="treatment-panel simple-treatment-panel">
-              <h4>{selectedObject.noise_control_type === 'direct' ? 'Reducción directa por banda' : 'Pérdida de inserción del silenciador'}</h4>
-              <div className="face-spectrum-grid">
-                {OCTAVE_BANDS.map(freq => (
-                  <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
-                    <input type="number" min="0" max="80" step="0.5" value={selectedObject.noise_control_type === 'direct' ? (selectedObject.control_reduction_db?.[freq] ?? 0) : (selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq])}
-                      onChange={e => selectedObject.noise_control_type === 'direct'
-                        ? patchSelected({control_reduction_db:{...(selectedObject.control_reduction_db || DEFAULT_CONTROL_BANDS),[freq]:Number(e.target.value)}})
-                        : patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})
-                      }/>
-                  </label>
-                ))}
-              </div>
+              {selectedObject.noise_control_type === 'direct' ? (
+                <>
+                  {selectedObject.spectrum_mode === 'broadband' && (
+                    <>
+                      <h4>Reducción directa global</h4>
+                      <div className="direct-single-field">
+                        <span>Reducción global declarada</span>
+                        <div><input type="number" min="0" max="80" step="0.5" value={selectedObject.control_direct_db ?? 0} onChange={e => patchSelected({control_direct_db:Number(e.target.value)})}/><b>dB</b></div>
+                      </div>
+                      <div className="engine-note">Se descuenta el mismo valor del LwA global de la fuente. No se genera un espectro artificial.</div>
+                    </>
+                  )}
+                  {selectedObject.spectrum_mode === 'single' && (
+                    <>
+                      <h4>Reducción directa a la frecuencia seleccionada</h4>
+                      <div className="direct-single-field">
+                        <span>{Number(selectedObject.single_frequency_hz || 500).toFixed(0)} Hz</span>
+                        <div><input type="number" min="0" max="80" step="0.5" value={selectedObject.control_direct_db ?? 0} onChange={e => patchSelected({control_direct_db:Number(e.target.value)})}/><b>dB</b></div>
+                      </div>
+                      <div className="engine-note">Este valor se aplica únicamente a la frecuencia Single de la fuente.</div>
+                    </>
+                  )}
+                  {selectedObject.spectrum_mode === 'octaves' && (
+                    <>
+                      <h4>Reducción directa por bandas</h4>
+                      <div className="face-spectrum-grid">
+                        {OCTAVE_BANDS.map(freq => (
+                          <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
+                            <input type="number" min="0" max="80" step="0.5" value={selectedObject.control_reduction_db?.[freq] ?? 0}
+                              onChange={e => patchSelected({control_reduction_db:{...(selectedObject.control_reduction_db || DEFAULT_CONTROL_BANDS),[freq]:Number(e.target.value)}})}/>
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h4>Pérdida de inserción del silenciador</h4>
+                  <div className="face-spectrum-grid">
+                    {OCTAVE_BANDS.map(freq => (
+                      <label key={freq}><span>{freq >= 1000 ? freq/1000+'k' : freq}</span>
+                        <input type="number" min="0" max="80" step="0.5" value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]}
+                          onChange={e => patchSelected({silencer_il_db:{...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),[freq]:Number(e.target.value)}})}/>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
