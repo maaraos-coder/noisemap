@@ -617,8 +617,72 @@ function App() {
     }
   }
 
+  const runAcousticCut = async (startPoint = cutStart, endPoint = cutEnd) => {
+    if (!startPoint || !endPoint) return
+
+    setCutLoading(true)
+    setCutError('')
+    setCutOpen(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/acoustic-cut`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sources,
+          roads,
+          barriers,
+          buildings,
+          contours,
+          start: startPoint,
+          end: endPoint,
+          max_height_m: cutMaxHeight,
+          horizontal_samples: 56,
+          vertical_samples: 32,
+          settings: {
+            resolution,
+            receiver_height_m: height,
+            alpha_db_per_km: alpha,
+            frequency_hz: frequency,
+            vmin,
+            vmax,
+            prediction_model: globalSettings.prediction_model,
+            a_weighting: globalSettings.a_weighting,
+            ground_factor: globalSettings.ground_factor,
+            temperature_c: globalSettings.temperature_c,
+            humidity_pct: globalSettings.humidity_pct,
+            max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
+            reflections_enabled: globalSettings.reflection_order !== 'none'
+          }
+        })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`)
+      setCutResult(data)
+    } catch (error) {
+      console.error('Corte acústico:', error)
+      setCutResult(null)
+      setCutError(error.message || 'No fue posible calcular el corte acústico.')
+    } finally {
+      setCutLoading(false)
+    }
+  }
+
   const onMapClick = event => {
     const { lat, lng } = event.lngLat
+
+    if (mode === 'cut') {
+      if (!cutStart) {
+        setCutStart([lat, lng])
+        setCutEnd(null)
+        setCutResult(null)
+      } else {
+        const endPoint = [lat, lng]
+        setCutEnd(endPoint)
+        setMode('navigate')
+        runAcousticCut(cutStart, endPoint)
+      }
+      return
+    }
 
     if (mode === 'source') {
       const item = {
@@ -2112,6 +2176,7 @@ function App() {
             onClick={e => {
               e.originalEvent.stopPropagation()
               setSelected({ type: 'source', id: source.id })
+              if (distanceMode === 'selected') setDistanceSourceId(source.id)
             }}
           >
             <div className="technical-marker source-marker" title={source.name}>
@@ -2146,6 +2211,7 @@ function App() {
             onClick={e => {
               e.originalEvent.stopPropagation()
               setSelected({ type: 'receiver', id: receiver.id })
+              if (distanceMode === 'selected') setDistanceReceiverId(receiver.id)
             }}
           >
             <div className="technical-marker receiver-marker" title={receiver.name}>
