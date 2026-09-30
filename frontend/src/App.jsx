@@ -4084,6 +4084,233 @@ function App() {
               <input type="number" step="0.5" value={selectedObject.dc_db}
                 onChange={e => patchSelected({ dc_db:Number(e.target.value) })} />
 
+              <h4 className="subheading source-control-heading">Control de ruido</h4>
+              <label>Tratamiento aplicado</label>
+              <select
+                value={selectedObject.noise_control_type || 'none'}
+                onChange={e => patchSelected({ noise_control_type:e.target.value })}
+              >
+                <option value="none">Sin tratamiento</option>
+                <option value="direct">Reducción directa de la fuente</option>
+                <option value="silencer">Silenciador / conducto</option>
+                <option value="enclosure">Encierro completo</option>
+                <option value="semi">Semiencierro</option>
+                <option value="enclosure_silencer">Encierro + silenciador</option>
+              </select>
+
+              {(selectedObject.noise_control_type || 'none') !== 'none' && selectedObject.spectrum_mode === 'broadband' && (
+                <>
+                  <div className="inline-field">
+                    <span>Reducción global declarada</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="80"
+                      step="0.5"
+                      value={selectedObject.control_global_db ?? 0}
+                      onChange={e => patchSelected({ control_global_db:Number(e.target.value) })}
+                    />
+                    <b>dB</b>
+                  </div>
+                  <div className="engine-note warning">
+                    En modo Broadband el motor solo puede aplicar una reducción global declarada. Para modelar físicamente el tratamiento por frecuencia, cambia la fuente a Octavas.
+                  </div>
+                </>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') === 'direct' && selectedObject.spectrum_mode !== 'broadband' && (
+                <>
+                  <div className="control-method-note">
+                    Reducción aplicada directamente al espectro original de la fuente, banda por banda.
+                  </div>
+                  <div className="control-band-editor">
+                    <div className="control-band-title"><span>Banda</span><b>Reducción [dB]</b></div>
+                    {OCTAVE_BANDS.map(freq => (
+                      <label key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="80"
+                          step="0.5"
+                          value={selectedObject.control_reduction_db?.[freq] ?? 0}
+                          onChange={e => patchSelected({
+                            control_reduction_db:{
+                              ...(selectedObject.control_reduction_db || DEFAULT_CONTROL_BANDS),
+                              [freq]:Number(e.target.value)
+                            }
+                          })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') === 'silencer' && selectedObject.spectrum_mode !== 'broadband' && (
+                <>
+                  <div className="control-method-note">
+                    Atenuación del silenciador/ducto por banda. Se descuenta antes de la propagación exterior.
+                  </div>
+                  <div className="control-band-editor">
+                    <div className="control-band-title"><span>Banda</span><b>IL / atenuación [dB]</b></div>
+                    {OCTAVE_BANDS.map(freq => (
+                      <label key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="80"
+                          step="0.5"
+                          value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]}
+                          onChange={e => patchSelected({
+                            silencer_il_db:{
+                              ...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),
+                              [freq]:Number(e.target.value)
+                            }
+                          })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {['enclosure','semi','enclosure_silencer'].includes(selectedObject.noise_control_type || 'none') && selectedObject.spectrum_mode !== 'broadband' && (
+                <>
+                  <div className="control-method-note">
+                    El cerramiento se calcula como transmisión energética por paneles más los caminos abiertos correspondientes; no se trata como una barrera por difracción.
+                  </div>
+                  <div className="control-band-editor">
+                    <div className="control-band-title"><span>Banda</span><b>TL cerramiento [dB]</b></div>
+                    {OCTAVE_BANDS.map(freq => (
+                      <label key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={selectedObject.enclosure_tl_db?.[freq] ?? DEFAULT_ENCLOSURE_TL[freq]}
+                          onChange={e => patchSelected({
+                            enclosure_tl_db:{
+                              ...(selectedObject.enclosure_tl_db || DEFAULT_ENCLOSURE_TL),
+                              [freq]:Number(e.target.value)
+                            }
+                          })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') === 'enclosure' && selectedObject.spectrum_mode !== 'broadband' && (
+                <div className="two-field-grid control-secondary-fields">
+                  <label>Fugas / aberturas [%]
+                    <input type="number" min="0" max="100" step="0.1"
+                      value={selectedObject.enclosure_leak_pct ?? 0}
+                      onChange={e => patchSelected({ enclosure_leak_pct:Number(e.target.value) })} />
+                  </label>
+                  <label>Modelo
+                    <input value="TL + fugas" disabled />
+                  </label>
+                </div>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') === 'semi' && selectedObject.spectrum_mode !== 'broadband' && (
+                <>
+                  <div className="two-field-grid control-secondary-fields">
+                    <label>Abertura [%]
+                      <input type="number" min="0" max="100" step="1"
+                        value={selectedObject.semi_opening_pct ?? 25}
+                        onChange={e => patchSelected({ semi_opening_pct:Number(e.target.value) })} />
+                    </label>
+                    <label>Azimut abertura [°]
+                      <input type="number" min="0" max="359" step="1"
+                        value={selectedObject.semi_opening_azimuth_deg ?? 0}
+                        onChange={e => patchSelected({ semi_opening_azimuth_deg:Number(e.target.value) })} />
+                    </label>
+                  </div>
+                  <label>Ancho angular de la abertura [°]</label>
+                  <input type="number" min="1" max="360" step="1"
+                    value={selectedObject.semi_opening_angle_deg ?? 90}
+                    onChange={e => patchSelected({ semi_opening_angle_deg:Number(e.target.value) })} />
+                  <div className="engine-note">
+                    Dentro del sector de abertura se combina la radiación directa por la abertura con la transmisión por los paneles. Fuera de ese sector se considera el camino transmitido por el cerramiento.
+                  </div>
+                </>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') === 'enclosure_silencer' && selectedObject.spectrum_mode !== 'broadband' && (
+                <>
+                  <div className="two-field-grid control-secondary-fields">
+                    <label>Fugas [%]
+                      <input type="number" min="0" max="100" step="0.1"
+                        value={selectedObject.enclosure_leak_pct ?? 0}
+                        onChange={e => patchSelected({ enclosure_leak_pct:Number(e.target.value) })} />
+                    </label>
+                    <label>Ventilación con silenciador [%]
+                      <input type="number" min="0" max="100" step="1"
+                        value={selectedObject.enclosure_vent_pct ?? 10}
+                        onChange={e => patchSelected({ enclosure_vent_pct:Number(e.target.value) })} />
+                    </label>
+                  </div>
+                  <h4 className="subheading control-inner-heading">Silenciador del camino de ventilación</h4>
+                  <div className="control-band-editor">
+                    <div className="control-band-title"><span>Banda</span><b>IL silenciador [dB]</b></div>
+                    {OCTAVE_BANDS.map(freq => (
+                      <label key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq} Hz</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="80"
+                          step="0.5"
+                          value={selectedObject.silencer_il_db?.[freq] ?? DEFAULT_SILENCER_IL[freq]}
+                          onChange={e => patchSelected({
+                            silencer_il_db:{
+                              ...(selectedObject.silencer_il_db || DEFAULT_SILENCER_IL),
+                              [freq]:Number(e.target.value)
+                            }
+                          })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="engine-note">
+                    El motor suma energéticamente tres caminos: transmisión por el cerramiento, fugas directas y ventilación atenuada por el silenciador.
+                  </div>
+                </>
+              )}
+
+              {(selectedObject.noise_control_type || 'none') !== 'none' && selectedObject.spectrum_mode === 'octaves' && (
+                <div className="control-summary">
+                  <div className="control-summary-head">
+                    <span>Espectro</span>
+                    <span>Original</span>
+                    <span>Control</span>
+                    <span>Nominal*</span>
+                  </div>
+                  {OCTAVE_BANDS.map(freq => {
+                    const original = Number(selectedObject.octave_levels?.[freq])
+                    const attenuation = nominalSourceControlAttenuation(selectedObject, freq)
+                    const treated = Number.isFinite(original) ? original - attenuation : null
+                    return (
+                      <div className="control-summary-row" key={freq}>
+                        <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
+                        <span>{Number.isFinite(original) ? original.toFixed(1) : '—'}</span>
+                        <span>−{attenuation.toFixed(1)}</span>
+                        <strong>{treated != null ? treated.toFixed(1) : '—'}</strong>
+                      </div>
+                    )
+                  })}
+                  <small>
+                    *Resumen nominal de emisión exterior. En semiencierro el resultado real depende de la dirección receptor–abertura.
+                  </small>
+                </div>
+              )}
+
               {nearestReceiverDistance && (
                 <div className="distance-card">
                   <span>Receptor más cercano</span>
