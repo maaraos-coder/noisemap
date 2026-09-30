@@ -165,6 +165,35 @@ function lineGeoJSON(points) {
   }
 }
 
+function pointInPolygon2D(lat, lon, points) {
+  if (!points?.length) return false
+  let inside = false
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const yi = Number(points[i][0])
+    const xi = Number(points[i][1])
+    const yj = Number(points[j][0])
+    const xj = Number(points[j][1])
+    const intersects = ((yi > lat) !== (yj > lat)) &&
+      (lon < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-12) + xi)
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+function distancePairsGeoJSON(pairs) {
+  return {
+    type: 'FeatureCollection',
+    features: pairs.map(pair => ({
+      type: 'Feature',
+      properties: { id: pair.id },
+      geometry: {
+        type: 'LineString',
+        coordinates: [[pair.source.lon, pair.source.lat], [pair.receiver.lon, pair.receiver.lat]]
+      }
+    }))
+  }
+}
+
 function levelColor(value, vmin, vmax) {
   const t = Math.max(0, Math.min(1, (value - vmin) / Math.max(vmax - vmin, 0.001)))
   const scaled = t * (COLORS.length - 1)
@@ -377,6 +406,7 @@ function IconButton({ active, title, icon, label, onClick }) {
 function App() {
   const mapRef = useRef(null)
   const projectFileInputRef = useRef(null)
+  const cutCanvasRef = useRef(null)
 
   const [mode, setMode] = useState('navigate')
   const [mapZoom, setMapZoom] = useState(1.35)
@@ -397,6 +427,17 @@ function App() {
   const [barrierHover, setBarrierHover] = useState(null)
   const [lineStart, setLineStart] = useState(null)
   const [rayMode, setRayMode] = useState('off')
+  const [distanceMode, setDistanceMode] = useState('off')
+  const [distanceOpen, setDistanceOpen] = useState(false)
+  const [distanceSourceId, setDistanceSourceId] = useState('')
+  const [distanceReceiverId, setDistanceReceiverId] = useState('')
+  const [cutOpen, setCutOpen] = useState(false)
+  const [cutStart, setCutStart] = useState(null)
+  const [cutEnd, setCutEnd] = useState(null)
+  const [cutResult, setCutResult] = useState(null)
+  const [cutLoading, setCutLoading] = useState(false)
+  const [cutError, setCutError] = useState('')
+  const [cutMaxHeight, setCutMaxHeight] = useState(30)
   const [searchOpen, setSearchOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topographyImportOpen, setTopographyImportOpen] = useState(false)
@@ -492,6 +533,45 @@ function App() {
   const contourData = useMemo(() => contoursGeoJSON(contours), [contours])
   const contourDraftData = useMemo(() => lineGeoJSON(contourDraft), [contourDraft])
   const rayData = useMemo(() => raysGeoJSON(sources, receivers, rayMode), [sources, receivers, rayMode])
+  const cutLineData = useMemo(
+    () => lineGeoJSON([cutStart, cutEnd].filter(Boolean)),
+    [cutStart, cutEnd]
+  )
+  const distancePairs = useMemo(() => {
+    if (distanceMode === 'off') return []
+
+    if (distanceMode === 'selected') {
+      const source = sources.find(item => item.id === distanceSourceId)
+      const receiver = receivers.find(item => item.id === distanceReceiverId)
+      if (!source || !receiver || !source.enabled || receiver.visible === false) return []
+      const horizontal = haversineMeters(source.lat, source.lon, receiver.lat, receiver.lon)
+      const vertical = Number(receiver.height_m || 0) - Number(source.height_m || 0)
+      return [{
+        id: `${source.id}:${receiver.id}`,
+        source,
+        receiver,
+        horizontal,
+        distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical)
+      }]
+    }
+
+    const pairs = []
+    sources.filter(item => item.enabled).forEach(source => {
+      receivers.filter(item => item.visible !== false).forEach(receiver => {
+        const horizontal = haversineMeters(source.lat, source.lon, receiver.lat, receiver.lon)
+        const vertical = Number(receiver.height_m || 0) - Number(source.height_m || 0)
+        pairs.push({
+          id: `${source.id}:${receiver.id}`,
+          source,
+          receiver,
+          horizontal,
+          distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical)
+        })
+      })
+    })
+    return pairs
+  }, [distanceMode, distanceSourceId, distanceReceiverId, sources, receivers])
+  const distanceData = useMemo(() => distancePairsGeoJSON(distancePairs), [distancePairs])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
   const draftData = useMemo(() => polygonGeoJSON(draftPolygon), [draftPolygon])
 
