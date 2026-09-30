@@ -265,6 +265,65 @@ function polylineLengthMeters(points) {
 
 const A_CORRECTIONS = {63:-26.2,125:-16.1,250:-8.6,500:-3.2,1000:0,2000:1.2,4000:1.0,8000:-1.1}
 
+const OCTAVE_BANDS = [63,125,250,500,1000,2000,4000,8000]
+const DEFAULT_CONTROL_BANDS = {63:0,125:0,250:0,500:0,1000:0,2000:0,4000:0,8000:0}
+const DEFAULT_ENCLOSURE_TL = {63:10,125:15,250:20,500:25,1000:30,2000:35,4000:35,8000:35}
+const DEFAULT_SILENCER_IL = {63:3,125:6,250:10,500:15,1000:20,2000:22,4000:20,8000:16}
+
+function bandValue(values, freq, fallback = 0) {
+  const raw = values?.[freq] ?? values?.[String(freq)]
+  const value = Number(raw)
+  return Number.isFinite(value) ? Math.max(0, value) : fallback
+}
+
+function nominalSourceControlAttenuation(source, freq) {
+  const kind = source.noise_control_type || 'none'
+  if (kind === 'none') return 0
+  if (source.spectrum_mode === 'broadband') return Math.max(0, Number(source.control_global_db) || 0)
+  if (kind === 'direct') return bandValue(source.control_reduction_db, freq)
+  if (kind === 'silencer') return bandValue(source.silencer_il_db, freq)
+
+  const tl = bandValue(source.enclosure_tl_db, freq)
+  const tauPanel = Math.pow(10, -tl / 10)
+
+  if (kind === 'enclosure') {
+    const leak = Math.max(0, Math.min(1, (Number(source.enclosure_leak_pct) || 0) / 100))
+    return -10 * Math.log10(Math.max((1 - leak) * tauPanel + leak, 1e-12))
+  }
+
+  if (kind === 'semi') {
+    const opening = Math.max(0, Math.min(1, (Number(source.semi_opening_pct) || 0) / 100))
+    const tau = (1 - opening) * tauPanel + opening
+    return -10 * Math.log10(Math.max(tau, 1e-12))
+  }
+
+  if (kind === 'enclosure_silencer') {
+    let leak = Math.max(0, Math.min(1, (Number(source.enclosure_leak_pct) || 0) / 100))
+    let vent = Math.max(0, Math.min(1, (Number(source.enclosure_vent_pct) || 0) / 100))
+    if (leak + vent > 1) {
+      const scale = 1 / (leak + vent)
+      leak *= scale
+      vent *= scale
+    }
+    const closed = Math.max(0, 1 - leak - vent)
+    const silencerTau = Math.pow(10, -bandValue(source.silencer_il_db, freq) / 10)
+    return -10 * Math.log10(Math.max(closed * tauPanel + leak + vent * silencerTau, 1e-12))
+  }
+
+  return 0
+}
+
+function sourceControlLabel(kind) {
+  return ({
+    none: 'Sin tratamiento',
+    direct: 'Reducción directa',
+    silencer: 'Silenciador / conducto',
+    enclosure: 'Encierro completo',
+    semi: 'Semiencierro',
+    enclosure_silencer: 'Encierro + silenciador'
+  })[kind || 'none'] || 'Sin tratamiento'
+}
+
 function energeticTotal(values) {
   const finite = values.filter(v => Number.isFinite(v))
   if (!finite.length) return null
@@ -726,7 +785,17 @@ function App() {
         single_frequency_hz: 500,
         octave_levels: {63: 92, 125: 95, 250: 98, 500: 100, 1000: 98, 2000: 94, 4000: 90, 8000: 84},
         adjust_db: 0,
-        time_active_pct: 100
+        time_active_pct: 100,
+        noise_control_type: 'none',
+        control_global_db: 0,
+        control_reduction_db: { ...DEFAULT_CONTROL_BANDS },
+        silencer_il_db: { ...DEFAULT_SILENCER_IL },
+        enclosure_tl_db: { ...DEFAULT_ENCLOSURE_TL },
+        enclosure_leak_pct: 0,
+        enclosure_vent_pct: 10,
+        semi_opening_pct: 25,
+        semi_opening_azimuth_deg: 0,
+        semi_opening_angle_deg: 90
       }
       setSources(prev => [...prev, item])
       setSelected({ type: 'source', id: item.id })
@@ -2641,6 +2710,9 @@ function App() {
               <span className="source-wave wave-a" />
               <span className="source-wave wave-b" />
               <span className="source-core">F</span>
+              {(source.noise_control_type || 'none') !== 'none' && (
+                <span className="source-control-badge" title={sourceControlLabel(source.noise_control_type)}>C</span>
+              )}
             </div>
           </Marker>
         ))}
