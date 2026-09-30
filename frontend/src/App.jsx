@@ -252,6 +252,21 @@ function haversineMeters(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa))
 }
 
+function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const toRad = d => d * Math.PI / 180
+  const toDeg = r => r * 180 / Math.PI
+  const p1 = toRad(Number(lat1))
+  const p2 = toRad(Number(lat2))
+  const dl = toRad(Number(lon2) - Number(lon1))
+  const y = Math.sin(dl) * Math.cos(p2)
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl)
+  return (toDeg(Math.atan2(y, x)) + 360) % 360
+}
+
+function angularDifferenceDegrees(a, b) {
+  return Math.abs((Number(a) - Number(b) + 180) % 360 - 180)
+}
+
 function polylineLengthMeters(points) {
   if (!points || points.length < 2) return 0
   return points.slice(1).reduce((sum, point, index) => (
@@ -1989,6 +2004,128 @@ function App() {
       const sy = yFor(Number(srcGround) + Number(selectedCutSource.height_m || 0))
       const rx = margin.left + recProj.t * plotW
       const ry = yFor(Number(recGround) + Number(selectedCutReceiver.height_m || 0))
+
+      // Draw the source-side control measure in the F-R section.
+      const controlType = selectedCutSource.noise_control_type || 'none'
+      if (controlType !== 'none') {
+        const direction = rx >= sx ? 1 : -1
+        const boxW = 34
+        const boxH = 28
+        const left = sx - boxW / 2
+        const top = sy - boxH / 2
+        const right = sx + boxW / 2
+        const bottom = sy + boxH / 2
+
+        ctx.save()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = '#24364b'
+        ctx.fillStyle = 'rgba(255,255,255,.74)'
+
+        if (controlType === 'enclosure' || controlType === 'enclosure_silencer') {
+          ctx.fillRect(left, top, boxW, boxH)
+          ctx.strokeRect(left, top, boxW, boxH)
+        }
+
+        if (controlType === 'semi') {
+          const bearingToReceiver = bearingDegrees(
+            selectedCutSource.lat,
+            selectedCutSource.lon,
+            selectedCutReceiver.lat,
+            selectedCutReceiver.lon
+          )
+          const openingAzimuth = Number(selectedCutSource.semi_opening_azimuth_deg ?? 0)
+          const openingAngle = Math.max(1, Number(selectedCutSource.semi_opening_angle_deg ?? 90))
+          const receiverInsideOpening = angularDifferenceDegrees(
+            bearingToReceiver,
+            openingAzimuth
+          ) <= openingAngle / 2
+
+          ctx.fillRect(left, top, boxW, boxH)
+          ctx.beginPath()
+          ctx.moveTo(left, top)
+          ctx.lineTo(right, top)
+          ctx.moveTo(left, bottom)
+          ctx.lineTo(right, bottom)
+
+          // In section, omit the wall on the side facing the opening.
+          if (receiverInsideOpening) {
+            const closedX = direction > 0 ? left : right
+            ctx.moveTo(closedX, top)
+            ctx.lineTo(closedX, bottom)
+          } else {
+            const closedX = direction > 0 ? right : left
+            ctx.moveTo(closedX, top)
+            ctx.lineTo(closedX, bottom)
+          }
+          ctx.stroke()
+
+          const openSideX = receiverInsideOpening
+            ? (direction > 0 ? right + 5 : left - 5)
+            : (direction > 0 ? left - 5 : right + 5)
+          ctx.strokeStyle = '#b36b00'
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.moveTo(openSideX, sy - 7)
+          ctx.lineTo(openSideX + direction * (receiverInsideOpening ? 9 : -9), sy)
+          ctx.lineTo(openSideX, sy + 7)
+          ctx.stroke()
+
+          ctx.fillStyle = '#8a5200'
+          ctx.font = '700 8px system-ui, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(
+            receiverInsideOpening ? 'abertura hacia R' : 'panel hacia R',
+            sx,
+            top - 15
+          )
+        }
+
+        if (controlType === 'silencer' || controlType === 'enclosure_silencer') {
+          const ductStart = controlType === 'enclosure_silencer'
+            ? (direction > 0 ? right : left)
+            : sx + direction * 8
+          const silW = 24
+          const silH = 12
+          const silCenter = ductStart + direction * 20
+          const silLeft = silCenter - silW / 2
+          const silTop = sy - silH / 2
+
+          ctx.strokeStyle = '#445b73'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(ductStart, sy)
+          ctx.lineTo(direction > 0 ? silLeft : silLeft + silW, sy)
+          ctx.stroke()
+          ctx.fillStyle = 'rgba(235,242,248,.94)'
+          ctx.fillRect(silLeft, silTop, silW, silH)
+          ctx.strokeRect(silLeft, silTop, silW, silH)
+          ctx.fillStyle = '#32485e'
+          ctx.font = '800 7px system-ui, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText('SIL', silCenter, sy + 2.5)
+        }
+
+        if (controlType === 'direct') {
+          ctx.fillStyle = 'rgba(255,255,255,.90)'
+          ctx.fillRect(sx - 20, sy - 26, 40, 13)
+          ctx.strokeStyle = '#5f6f7f'
+          ctx.lineWidth = 1
+          ctx.strokeRect(sx - 20, sy - 26, 40, 13)
+        }
+
+        ctx.fillStyle = '#24364b'
+        ctx.font = '800 8px system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        const controlLabel = ({
+          direct: 'Reducción directa',
+          silencer: 'Silenciador',
+          enclosure: 'Encierro',
+          semi: 'Semiencierro',
+          enclosure_silencer: 'Encierro + SIL'
+        })[controlType] || 'Control'
+        ctx.fillText(controlLabel, sx, top - 5)
+        ctx.restore()
+      }
 
       ctx.save()
       ctx.beginPath()
