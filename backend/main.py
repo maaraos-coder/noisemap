@@ -91,16 +91,55 @@ def _source_band_level(source, band_hz: int) -> Optional[float]:
 
 
 def _dict_band_value(values: Dict[str, float], band_hz: float, default: float = 0.0) -> float:
+    """Return a spectral value using logarithmic-frequency interpolation.
+
+    Exact octave-band values are preserved. Frequencies between defined bands
+    are interpolated in log(f), which is preferable to snapping Single mode to
+    the nearest octave band.
+    """
     if not values:
         return float(default)
-    nearest = min(OCTAVE_BANDS, key=lambda b: abs(float(b) - float(band_hz)))
-    for key in (str(nearest), nearest):
-        if key in values:
-            try:
-                return max(0.0, float(values[key]))
-            except (TypeError, ValueError):
-                return float(default)
+
+    pts = []
+    for band in OCTAVE_BANDS:
+        raw = values.get(str(band), values.get(band))
+        if raw is None:
+            continue
+        try:
+            pts.append((float(band), max(0.0, float(raw))))
+        except (TypeError, ValueError):
+            continue
+    if not pts:
+        return float(default)
+
+    f = max(float(band_hz), 1e-6)
+    pts.sort()
+    if f <= pts[0][0]:
+        return pts[0][1]
+    if f >= pts[-1][0]:
+        return pts[-1][1]
+
+    for (f0, v0), (f1, v1) in zip(pts, pts[1:]):
+        if f0 <= f <= f1:
+            if abs(f1 - f0) < 1e-12:
+                return v0
+            t = (math.log(f) - math.log(f0)) / (math.log(f1) - math.log(f0))
+            return v0 + t * (v1 - v0)
     return float(default)
+
+
+def _a_weighting_correction_db(frequency_hz: float) -> float:
+    """IEC-style analytical A-weighting correction for an arbitrary frequency."""
+    f = max(float(frequency_hz), 1e-6)
+    f2 = f * f
+    numerator = (12200.0 ** 2) * (f ** 4)
+    denominator = (
+        (f2 + 20.6 ** 2)
+        * math.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2))
+        * (f2 + 12200.0 ** 2)
+    )
+    ra = numerator / max(denominator, 1e-30)
+    return 20.0 * math.log10(max(ra, 1e-30)) + 2.0
 
 
 def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -117,40 +156,55 @@ def _angular_difference_deg(a: float, b: float) -> float:
 
 
 def _rw_estimated_tl_db(rw_db: float, band_hz: float) -> float:
-    """Approximate octave-band TL shape from a single Rw value.
+    """Estimate an octave-band R/TL curve from a single Rw.
 
-    This is intentionally labelled as an engineering estimate in the UI. It does
-    not replace a measured/certified spectrum. The curve is anchored at 500 Hz
-    and follows a conservative generic mass-law-like shape.
+    The shape follows the ISO 717-1 reference-curve trend around 125-3150 Hz
+    and is explicitly only a design estimate; 63 Hz and the upper octaves are
+    extrapolated. A measured/certified spectrum should be preferred.
     """
     rw = max(0.0, float(rw_db or 0.0))
     offsets = {
-        63: -20.0,
-        125: -14.0,
-        250: -8.0,
-        500: -3.0,
-        1000: 0.0,
-        2000: 3.0,
-        4000: 5.0,
-        8000: 6.0,
+        "63": -25.0,
+        "125": -16.0,
+        "250": -7.0,
+        "500": 0.0,
+        "1000": 3.0,
+        "2000": 4.0,
+        "4000": 4.0,
+        "8000": 4.0,
     }
-    nearest = min(OCTAVE_BANDS, key=lambda b: abs(float(b) - float(band_hz)))
-    return max(0.0, rw + offsets[nearest])
+    return max(0.0, rw + _dict_band_value(offsets, band_hz, 0.0))
 
 
-def _enclosure_face_name_for_receiver(source, receiver_lat: Optional[float], receiver_lon: Optional[float]) -> str:
-    """Return the vertical enclosure face crossed by the horizontal source-receiver ray."""
-    if receiver_lat is None or receiver_lon is None:
-        return "front"
-    bearing = _bearing_deg(source.lat, source.lon, receiver_lat, receiver_lon)
-    relative = (bearing - float(getattr(source, "enclosure_azimuth_deg", 0.0) or 0.0) + 360.0) % 360.0
-    if relative < 45.0 or relative >= 315.0:
-        return "front"
-    if relative < 135.0:
-        return "right"
-    if relative < 225.0:
-        return "back"
-    return "left"
+ENCLOSURE_ABSORPTION_PRESETS = {
+    # Generic room-side absorption coefficients for educational enclosure design.
+    # These are not material certificates.
+    "unlined": {
+        "63": 0.02, "125": 0.02, "250": 0.03, "500": 0.04,
+        "1000": 0.05, "2000": 0.05, "4000": 0.05, "8000": 0.05,
+    },
+    "low": {
+        "63": 0.04, "125": 0.06, "250": 0.10, "500": 0.16,
+        "1000": 0.22, "2000": 0.28, "4000": 0.30, "8000": 0.30,
+    },
+    "medium": {
+        "63": 0.08, "125": 0.15, "250": 0.30, "500": 0.50,
+        "1000": 0.65, "2000": 0.75, "4000": 0.80, "8000": 0.80,
+    },
+    "high": {
+        "63": 0.15, "125": 0.30, "250": 0.55, "500": 0.72,
+        "1000": 0.84, "2000": 0.90, "4000": 0.92, "8000": 0.92,
+    },
+}
+
+
+def _enclosure_absorption_alpha(source, band_hz: float) -> float:
+    mode = str(getattr(source, "enclosure_lining_mode", "unlined") or "unlined").lower()
+    if mode == "custom":
+        alpha = _dict_band_value(getattr(source, "enclosure_absorption_coeff", {}) or {}, band_hz, 0.05)
+    else:
+        alpha = _dict_band_value(ENCLOSURE_ABSORPTION_PRESETS.get(mode, ENCLOSURE_ABSORPTION_PRESETS["unlined"]), band_hz, 0.05)
+    return min(max(float(alpha), 0.0), 0.99)
 
 
 def _face_tl_db(source, face_name: str, band_hz: float) -> float:
@@ -159,22 +213,191 @@ def _face_tl_db(source, face_name: str, band_hz: float) -> float:
     mode = str(face.get("acoustic_mode", "rw") or "rw").lower()
     if mode == "spectrum":
         return _dict_band_value(face.get("tl_db") or {}, band_hz)
-    return _rw_estimated_tl_db(float(face.get("rw_db", getattr(source, "enclosure_rw_db", 30.0)) or 0.0), band_hz)
+    return _rw_estimated_tl_db(
+        float(face.get("rw_db", getattr(source, "enclosure_rw_db", 30.0)) or 0.0),
+        band_hz,
+    )
 
 
-def _face_transmission_tau(source, face_name: str, band_hz: float) -> float:
-    faces = getattr(source, "enclosure_faces", None) or {}
-    face = faces.get(face_name) or {}
+def _offset_latlon(lat: float, lon: float, east_m: float, north_m: float) -> tuple[float, float]:
+    dlat = math.degrees(float(north_m) / 6_371_000.0)
+    lat2 = float(lat) + dlat
+    mean_lat = math.radians((float(lat) + lat2) / 2.0)
+    dlon = math.degrees(float(east_m) / (6_371_000.0 * max(math.cos(mean_lat), 1e-9)))
+    return lat2, float(lon) + dlon
+
+
+def _enclosure_face_geometry(source) -> Dict[str, dict]:
+    length = max(float(getattr(source, "enclosure_length_m", 2.0) or 2.0), 0.01)
+    width = max(float(getattr(source, "enclosure_width_m", 2.0) or 2.0), 0.01)
+    height = max(float(getattr(source, "enclosure_height_m", 2.5) or 2.5), 0.01)
+    az = math.radians(float(getattr(source, "enclosure_azimuth_deg", 0.0) or 0.0))
+
+    # Horizontal unit vectors, with azimuth measured clockwise from North.
+    front = (math.sin(az), math.cos(az))
+    right = (math.cos(az), -math.sin(az))
+
+    center_z = max(float(source.height_m), height / 2.0)
+    wall_z = center_z
+    roof_z = center_z + height / 2.0
+    floor_z = max(0.05, center_z - height / 2.0)
+
+    specs = {
+        "front": (front[0] * length / 2.0, front[1] * length / 2.0, wall_z, width * height, (front[0], front[1], 0.0)),
+        "back": (-front[0] * length / 2.0, -front[1] * length / 2.0, wall_z, width * height, (-front[0], -front[1], 0.0)),
+        "right": (right[0] * width / 2.0, right[1] * width / 2.0, wall_z, length * height, (right[0], right[1], 0.0)),
+        "left": (-right[0] * width / 2.0, -right[1] * width / 2.0, wall_z, length * height, (-right[0], -right[1], 0.0)),
+        "roof": (0.0, 0.0, roof_z, length * width, (0.0, 0.0, 1.0)),
+        "floor": (0.0, 0.0, floor_z, length * width, (0.0, 0.0, -1.0)),
+    }
+
+    result = {}
+    for name, (east, north, z, area, normal) in specs.items():
+        lat, lon = _offset_latlon(source.lat, source.lon, east, north)
+        result[name] = {
+            "lat": lat,
+            "lon": lon,
+            "height_m": z,
+            "area_m2": max(area, 1e-9),
+            "normal": normal,
+        }
+    return result
+
+
+def _face_open_fraction(face: dict) -> float:
     state = str(face.get("state", "closed") or "closed").lower()
     if state == "open":
         return 1.0
-
-    tl = _face_tl_db(source, face_name, band_hz)
-    tau_panel = 10.0 ** (-tl / 10.0)
     if state == "partial":
-        opening = min(max(float(face.get("opening_pct", 25.0) or 0.0) / 100.0, 0.0), 1.0)
-        return (1.0 - opening) * tau_panel + opening
-    return tau_panel
+        return min(max(float(face.get("opening_pct", 25.0) or 0.0) / 100.0, 0.0), 1.0)
+    return 0.0
+
+
+def _face_radiation_dc_db(
+    face_geometry: dict,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_abs_z: float,
+    source_ground_elevation_m: float,
+) -> Optional[float]:
+    """Lambertian half-space radiation from a panel/opening.
+
+    Q(theta)=4*cos(theta), normalized so the pattern integrates to the face
+    sound power over 4π. Returns None when the receiver lies behind the face.
+    """
+    sx, sy = latlon_to_xy(face_geometry["lat"], face_geometry["lon"], face_geometry["lat"], face_geometry["lon"])
+    rx, ry = latlon_to_xy(receiver_lat, receiver_lon, face_geometry["lat"], face_geometry["lon"])
+    dz = receiver_abs_z - (source_ground_elevation_m + float(face_geometry["height_m"]))
+    distance = math.sqrt((rx - sx) ** 2 + (ry - sy) ** 2 + dz ** 2)
+    if distance <= 1e-9:
+        return 0.0
+
+    ux, uy, uz = (rx - sx) / distance, (ry - sy) / distance, dz / distance
+    nx, ny, nz = face_geometry["normal"]
+    cos_theta = nx * ux + ny * uy + nz * uz
+    if cos_theta <= 1e-5:
+        return None
+    q = max(4.0 * cos_theta, 1e-6)
+    return 10.0 * math.log10(q)
+
+
+def _enclosure_virtual_sources(
+    source,
+    band_hz: float,
+    input_lw_db: float,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_height_m: float,
+    source_ground_elevation_m: float,
+    receiver_ground_elevation_m: float,
+) -> list[Source]:
+    """Convert an enclosure/semi-enclosure into radiating face sources.
+
+    A diffuse-field energy balance is used inside the enclosure. Closed panel
+    area contributes room-side absorption plus transmission loss; open area is
+    an acoustic loss area of 1.0. External power from every face is then
+    propagated independently with a smooth Lambertian directivity.
+    """
+    faces_cfg = getattr(source, "enclosure_faces", None) or {}
+    geometry = _enclosure_face_geometry(source)
+    alpha = _enclosure_absorption_alpha(source, band_hz)
+
+    vent_area_requested = 0.0
+    vent_face = str(getattr(source, "enclosure_vent_face", "back") or "back").lower()
+    if (getattr(source, "noise_control_type", "") or "").lower() == "enclosure_silencer":
+        vent_area_requested = max(float(getattr(source, "enclosure_vent_area_m2", 0.0) or 0.0), 0.0)
+    if vent_face not in geometry:
+        vent_face = "back"
+
+    # Build effective loss area of the cavity and remember external transmission areas.
+    path_data = {}
+    loss_area = 0.0
+    remaining_vent_area = vent_area_requested
+
+    for face_name, geom in geometry.items():
+        face = faces_cfg.get(face_name) or {}
+        area = float(geom["area_m2"])
+        open_fraction = _face_open_fraction(face)
+        open_area = area * open_fraction
+        panel_area = max(0.0, area - open_area)
+
+        vent_area = 0.0
+        if face_name == vent_face and remaining_vent_area > 0.0 and panel_area > 0.0:
+            vent_area = min(panel_area, remaining_vent_area)
+            panel_area -= vent_area
+            remaining_vent_area -= vent_area
+
+        tl = _face_tl_db(source, face_name, band_hz)
+        tau_panel = 10.0 ** (-tl / 10.0)
+
+        # Closed portion loses energy by internal lining absorption and by transmission.
+        # An opening (including the vent inlet) removes incident diffuse-field energy
+        # from the cavity. This keeps the energy balance bounded by the input power.
+        panel_loss_coeff = min(1.0, alpha + tau_panel)
+        loss_area += panel_area * panel_loss_coeff + open_area + vent_area
+
+        external_area_tau = panel_area * tau_panel + open_area
+        if vent_area > 0.0:
+            il = _dict_band_value(getattr(source, "silencer_il_db", {}) or {}, band_hz)
+            tau_silencer = 10.0 ** (-il / 10.0)
+            external_area_tau += vent_area * tau_silencer
+
+        path_data[face_name] = {
+            "external_area_tau": external_area_tau,
+            "geometry": geom,
+        }
+
+    loss_area = max(loss_area, 1e-9)
+    receiver_abs_z = receiver_ground_elevation_m + float(receiver_height_m)
+    virtual_sources = []
+
+    for face_name, data in path_data.items():
+        ratio = max(0.0, min(1.0, data["external_area_tau"] / loss_area))
+        if ratio <= 1e-12:
+            continue
+        dc = _face_radiation_dc_db(
+            data["geometry"],
+            receiver_lat,
+            receiver_lon,
+            receiver_abs_z,
+            source_ground_elevation_m,
+        )
+        if dc is None:
+            continue
+
+        face_lw = float(input_lw_db) + 10.0 * math.log10(max(ratio, 1e-12))
+        virtual_sources.append(Source(
+            name=f"{source.name} · {face_name}",
+            lat=float(data["geometry"]["lat"]),
+            lon=float(data["geometry"]["lon"]),
+            height_m=float(data["geometry"]["height_m"]),
+            lw_db=face_lw,
+            dc_db=dc,
+            enabled=source.enabled,
+            ground_elevation_m=source_ground_elevation_m,
+        ))
+
+    return virtual_sources
 
 
 def _source_control_attenuation_db(
@@ -183,36 +406,18 @@ def _source_control_attenuation_db(
     receiver_lat: Optional[float] = None,
     receiver_lon: Optional[float] = None,
 ) -> float:
-    """Equivalent source-side attenuation for one frequency band.
+    """Source-side control for non-enclosure controls.
 
-    Enclosures and semi-enclosures are resolved geometrically by the face that
-    lies in the source-receiver direction. Each face can be closed, open or
-    partially open and can use either a single Rw-derived spectrum or explicit
-    octave-band TL data.
+    Enclosures are handled explicitly as multiple radiating surfaces by
+    _enclosure_virtual_sources(), rather than by subtracting a single TL.
     """
     kind = (getattr(source, "noise_control_type", "none") or "none").lower()
-    if kind == "none":
-        return 0.0
-
     if kind == "direct":
         return _dict_band_value(source.control_reduction_db, band_hz)
-
     if kind == "silencer":
         return _dict_band_value(source.silencer_il_db, band_hz)
-
-    if kind in ("enclosure", "semi", "enclosure_silencer"):
-        face_name = _enclosure_face_name_for_receiver(source, receiver_lat, receiver_lon)
-        tau = _face_transmission_tau(source, face_name, band_hz)
-
-        if kind == "enclosure_silencer":
-            vent = min(max(float(getattr(source, "enclosure_vent_pct", 0.0) or 0.0) / 100.0, 0.0), 1.0)
-            silencer_il = _dict_band_value(source.silencer_il_db, band_hz)
-            tau_silencer = 10.0 ** (-silencer_il / 10.0)
-            tau = (1.0 - vent) * tau + vent * tau_silencer
-
-        return max(0.0, -10.0 * math.log10(max(tau, 1e-12)))
-
     return 0.0
+
 
 def _settings_for_band(base, band_hz: float) -> PropagationSettings:
     alpha_db_per_km = (
@@ -256,7 +461,63 @@ def _source_spectral_result(
         receiver_ground_elevation_m = _terrain_elevation(
             terrain_samples, receiver_lat, receiver_lon, lat0, lon0
         )
+
     mode = (source_input.spectrum_mode or "broadband").lower()
+    control_kind = (source_input.noise_control_type or "none").lower()
+    enclosure_control = control_kind in ("enclosure", "semi", "enclosure_silencer")
+
+    def propagate_at_frequency(lw_input: float, frequency_hz: float) -> float:
+        band_settings = _settings_for_band(base_settings, frequency_hz)
+
+        if enclosure_control:
+            emitters = _enclosure_virtual_sources(
+                source_input,
+                frequency_hz,
+                lw_input + adjustment,
+                receiver_lat,
+                receiver_lon,
+                receiver_height_m,
+                source_ground_elevation_m,
+                receiver_ground_elevation_m,
+            )
+            if not emitters:
+                return float("-inf")
+            return level_at_point(
+                emitters,
+                receiver_lat,
+                receiver_lon,
+                receiver_height_m,
+                barriers,
+                band_settings,
+                lat0,
+                lon0,
+                receiver_ground_elevation_m=receiver_ground_elevation_m,
+            )
+
+        control_att = _source_control_attenuation_db(
+            source_input, frequency_hz, receiver_lat, receiver_lon
+        )
+        source_model = Source(
+            name=source_input.name,
+            lat=source_input.lat,
+            lon=source_input.lon,
+            height_m=source_input.height_m,
+            lw_db=float(lw_input) + adjustment - control_att,
+            dc_db=source_input.dc_db,
+            enabled=source_input.enabled,
+            ground_elevation_m=source_ground_elevation_m,
+        )
+        return level_at_point(
+            [source_model],
+            receiver_lat,
+            receiver_lon,
+            receiver_height_m,
+            barriers,
+            band_settings,
+            lat0,
+            lon0,
+            receiver_ground_elevation_m=receiver_ground_elevation_m,
+        )
 
     if mode == "octaves":
         bands_db = {}
@@ -267,35 +528,11 @@ def _source_spectral_result(
                 bands_db[str(band)] = None
                 continue
 
-            control_att = _source_control_attenuation_db(
-                source_input, band, receiver_lat, receiver_lon
-            )
-            source_model = Source(
-                name=source_input.name,
-                lat=source_input.lat,
-                lon=source_input.lon,
-                height_m=source_input.height_m,
-                lw_db=lw + adjustment - control_att,
-                dc_db=source_input.dc_db,
-                enabled=source_input.enabled,
-                ground_elevation_m=source_ground_elevation_m,
-            )
-            band_settings = _settings_for_band(base_settings, band)
-            lp = level_at_point(
-                [source_model],
-                receiver_lat,
-                receiver_lon,
-                receiver_height_m,
-                barriers,
-                band_settings,
-                lat0,
-                lon0,
-                receiver_ground_elevation_m=receiver_ground_elevation_m,
-            )
+            lp = propagate_at_frequency(lw, band)
             if np.isfinite(lp):
                 bands_db[str(band)] = round(float(lp), 3)
                 weighted_levels.append(
-                    float(lp) + (A_WEIGHTING_DB[band] if base_settings.a_weighting else 0.0)
+                    float(lp) + (_a_weighting_correction_db(band) if base_settings.a_weighting else 0.0)
                 )
             else:
                 bands_db[str(band)] = None
@@ -309,87 +546,29 @@ def _source_spectral_result(
 
     if mode == "single":
         frequency = max(float(source_input.single_frequency_hz), 1.0)
-        control_att = _source_control_attenuation_db(
-            source_input, frequency, receiver_lat, receiver_lon
+        lp = propagate_at_frequency(float(source_input.lw_db), frequency)
+        total = (
+            float(lp) + (_a_weighting_correction_db(frequency) if base_settings.a_weighting else 0.0)
+            if np.isfinite(lp)
+            else None
         )
-        source_model = Source(
-            name=source_input.name,
-            lat=source_input.lat,
-            lon=source_input.lon,
-            height_m=source_input.height_m,
-            lw_db=float(source_input.lw_db) + adjustment - control_att,
-            dc_db=source_input.dc_db,
-            enabled=source_input.enabled,
-            ground_elevation_m=source_ground_elevation_m,
-        )
-        band_settings = _settings_for_band(base_settings, frequency)
-        lp = level_at_point(
-            [source_model],
-            receiver_lat,
-            receiver_lon,
-            receiver_height_m,
-            barriers,
-            band_settings,
-            lat0,
-            lon0,
-            receiver_ground_elevation_m=receiver_ground_elevation_m,
-        )
-        nearest_band = min(OCTAVE_BANDS, key=lambda b: abs(b - frequency))
-        if np.isfinite(lp):
-            total = float(lp) + (
-                A_WEIGHTING_DB[nearest_band] if base_settings.a_weighting else 0.0
-            )
-        else:
-            total = None
         return {
             "total_db": total,
-            "bands_db": {
-                str(b): (round(float(lp), 3) if b == nearest_band and np.isfinite(lp) else None)
-                for b in OCTAVE_BANDS
-            },
+            "bands_db": {str(b): None for b in OCTAVE_BANDS},
+            "single_level_db": round(float(lp), 3) if np.isfinite(lp) else None,
             "mode": "single",
             "frequency_hz": frequency,
         }
 
-    # Broadband is entered as LwA in the current UI. It is propagated as a
-    # broadband A-weighted quantity, so no artificial octave spectrum is invented.
-    control_att = _source_control_attenuation_db(
-        source_input, base_settings.frequency_hz, receiver_lat, receiver_lon
-    )
-    source_model = Source(
-        name=source_input.name,
-        lat=source_input.lat,
-        lon=source_input.lon,
-        height_m=source_input.height_m,
-        lw_db=float(source_input.lw_db) + adjustment - control_att,
-        dc_db=source_input.dc_db,
-        enabled=source_input.enabled,
-        ground_elevation_m=source_ground_elevation_m,
-    )
-    broadband_settings = PropagationSettings(
-        alpha_db_per_km=base_settings.alpha_db_per_km,
-        frequency_hz=base_settings.frequency_hz,
-        max_barrier_db=base_settings.max_barrier_db,
-        temperature_c=base_settings.temperature_c,
-        humidity_pct=base_settings.humidity_pct,
-        ground_factor=base_settings.ground_factor,
-        reflections_enabled=base_settings.reflections_enabled,
-    )
-    lp = level_at_point(
-        [source_model],
-        receiver_lat,
-        receiver_lon,
-        receiver_height_m,
-        barriers,
-        broadband_settings,
-        lat0,
-        lon0,
-        receiver_ground_elevation_m=receiver_ground_elevation_m,
-    )
+    # Broadband is entered as LwA. No artificial spectrum is created; propagation
+    # and enclosure transfer are evaluated at the map calculation frequency.
+    frequency = max(float(base_settings.frequency_hz), 1.0)
+    lp = propagate_at_frequency(float(source_input.lw_db), frequency)
     return {
         "total_db": float(lp) if np.isfinite(lp) else None,
         "bands_db": {str(b): None for b in OCTAVE_BANDS},
         "mode": "broadband",
+        "frequency_hz": frequency,
     }
 
 
@@ -725,6 +904,10 @@ class SourceIn(BaseModel):
     enclosure_azimuth_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
     enclosure_rw_db: float = Field(default=30.0, ge=0.0, le=100.0)
     enclosure_faces: Dict[str, Dict[str, Any]] = {}
+    enclosure_lining_mode: str = "unlined"
+    enclosure_absorption_coeff: Dict[str, float] = {}
+    enclosure_vent_area_m2: float = Field(default=0.10, ge=0.0, le=1000.0)
+    enclosure_vent_face: str = "back"
     # Legacy semi-enclosure fields retained for backward-compatible project loads.
     semi_opening_pct: float = Field(default=25.0, ge=0.0, le=100.0)
     semi_opening_azimuth_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
