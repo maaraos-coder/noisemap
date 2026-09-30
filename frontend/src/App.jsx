@@ -1811,7 +1811,8 @@ function App() {
     const cutToleranceM = 8
     sources.filter(item => item.enabled).forEach(source => {
       const projected = projectToCut(source.lat, source.lon)
-      if (projected.cross > cutToleranceM) return
+      const isSelectedPairSource = source.id === distanceSourceId
+      if (projected.cross > cutToleranceM && !isSelectedPairSource) return
       const terrainIndex = Math.min(
         terrain.length - 1,
         Math.max(0, Math.round(projected.t * Math.max(terrain.length - 1, 0)))
@@ -1832,11 +1833,17 @@ function App() {
       ctx.font = '700 10px system-ui, sans-serif'
       ctx.textAlign = 'center'
       ctx.fillText(source.name || 'F', x, y - 10)
+      if (projected.cross > cutToleranceM) {
+        ctx.font = '600 8px system-ui, sans-serif'
+        ctx.fillStyle = '#8b4a53'
+        ctx.fillText(`offset lateral ${projected.cross.toFixed(1)} m`, x, y + 15)
+      }
     })
 
     receivers.filter(item => item.visible !== false).forEach(receiver => {
       const projected = projectToCut(receiver.lat, receiver.lon)
-      if (projected.cross > cutToleranceM) return
+      const isSelectedPairReceiver = receiver.id === distanceReceiverId
+      if (projected.cross > cutToleranceM && !isSelectedPairReceiver) return
       const terrainIndex = Math.min(
         terrain.length - 1,
         Math.max(0, Math.round(projected.t * Math.max(terrain.length - 1, 0)))
@@ -1857,6 +1864,11 @@ function App() {
       ctx.font = '700 10px system-ui, sans-serif'
       ctx.textAlign = 'center'
       ctx.fillText(receiver.name || 'R', x, y - 10)
+      if (projected.cross > cutToleranceM) {
+        ctx.font = '600 8px system-ui, sans-serif'
+        ctx.fillStyle = '#315d8f'
+        ctx.fillText(`offset lateral ${projected.cross.toFixed(1)} m`, x, y + 15)
+      }
     })
 
     // Building solids intersected by the A-B cut.
@@ -1939,7 +1951,7 @@ function App() {
     ctx.fillText('A', margin.left + 4, margin.top + 15)
     ctx.textAlign = 'right'
     ctx.fillText('B', margin.left + plotW - 4, margin.top + 15)
-  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, vmin, vmax])
+  }, [cutResult, cutStart, cutEnd, buildings, sources, receivers, distanceSourceId, distanceReceiverId, vmin, vmax])
 
   const nearestReceiverDistance = useMemo(() => {
     if (!selectedObject || selected?.type !== 'source' || receivers.length === 0) return null
@@ -3282,7 +3294,7 @@ function App() {
               </div>
 
               <div className="engine-note">
-                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro, los edificios interceptados por el corte como sólidos, las fuentes cercanas al plano A–B en rojo y los receptores en azul. Los colores representan el nivel calculado en cada punto del plano vertical.
+                Vista de análisis: no modifica el proyecto. El terreno se muestra en gris oscuro, los edificios interceptados por el corte como sólidos, las fuentes en rojo y los receptores en azul. Los objetos alejados más de 8 m del plano A–B no se muestran, salvo la pareja F–R seleccionada, que se proyecta al corte e indica su offset lateral.
               </div>
             </>
           )}
