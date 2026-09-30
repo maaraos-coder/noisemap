@@ -441,6 +441,9 @@ def _source_control_attenuation_db(
     """
     kind = (getattr(source, "noise_control_type", "none") or "none").lower()
     if kind == "direct":
+        mode = (getattr(source, "spectrum_mode", "broadband") or "broadband").lower()
+        if mode in ("broadband", "single"):
+            return max(0.0, float(getattr(source, "control_direct_db", 0.0) or 0.0))
         return _dict_band_value(source.control_reduction_db, band_hz)
     if kind == "silencer":
         return _dict_band_value(source.silencer_il_db, band_hz)
@@ -920,6 +923,7 @@ class SourceIn(BaseModel):
     # Legacy field retained only for loading older saved projects; the current
     # engine no longer uses a declared broadband reduction.
     control_global_db: float = Field(default=0.0, ge=0.0, le=80.0)
+    control_direct_db: float = Field(default=0.0, ge=0.0, le=80.0)
     control_reduction_db: Dict[str, float] = {}
     silencer_il_db: Dict[str, float] = {}
     enclosure_tl_db: Dict[str, float] = {}
