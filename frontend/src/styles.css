@@ -3399,3 +3399,35 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.cut-toolbar-pair {
+  grid-template-columns: 165px minmax(145px,1fr) minmax(125px,.85fr) minmax(110px,.75fr);
+}
+.cut-pair-button,
+.distance-cut-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: #0b63ce;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cut-pair-button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.distance-cut-button {
+  width: 100%;
+  margin-top: 8px;
+}
+.distance-cut-button:hover,
+.cut-pair-button:hover:not(:disabled) {
+  background: #084f9f;
+}
+@media (max-width: 900px) {
+  .cut-toolbar-pair {
+    grid-template-columns: 1fr;
+  }
+}
