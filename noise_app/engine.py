@@ -304,6 +304,7 @@ def first_order_reflection_level_db(
     lat0: float,
     lon0: float,
     receiver_ground_elevation_m: float = 0.0,
+    all_barriers: Optional[list[Barrier]] = None,
 ) -> float:
     """Single specular reflection from a vertical finite barrier using image-source geometry."""
     if not barrier.enabled or barrier.reflection_percent <= 0.0:
@@ -344,24 +345,55 @@ def first_order_reflection_level_db(
     if reflection_z < barrier_bottom_z or reflection_z > barrier_top_z:
         return float("-inf")
 
+    reflection_x = isx + t_img * (rx - isx)
+    reflection_y = isy + t_img * (ry - isy)
+
+    def leg_blocked(x1, y1, z1, x2, y2, z2) -> bool:
+        for other in (all_barriers or []):
+            if not other.enabled or other is barrier:
+                continue
+            oa = latlon_to_xy(other.lat_a, other.lon_a, lat0, lon0)
+            ob = latlon_to_xy(other.lat_b, other.lon_b, lat0, lon0)
+            hit_other, t_other, _ = segment_intersection((x1, y1), (x2, y2), oa, ob)
+            if not hit_other or t_other <= 1e-6 or t_other >= 1.0 - 1e-6:
+                continue
+            z_los = z1 + t_other * (z2 - z1)
+            other_bottom = other.ground_elevation_m
+            other_top = other_bottom + other.height_m
+            if other_bottom <= z_los <= other_top:
+                return True
+        return False
+
+    if leg_blocked(sx, sy, source_z, reflection_x, reflection_y, reflection_z):
+        return float("-inf")
+    if leg_blocked(reflection_x, reflection_y, reflection_z, rx, ry, receiver_z):
+        return float("-inf")
+
+    reflected_horizontal = math.hypot(rx - isx, ry - isy)
     reflected_distance = math.sqrt(
-        (rx - isx) ** 2 + (ry - isy) ** 2 + (receiver_z - source_z) ** 2
+        reflected_horizontal ** 2 + (receiver_z - source_z) ** 2
     )
     reflected_distance = max(1.0, reflected_distance)
 
     a_div = geometric_divergence_db(reflected_distance)
     a_atm = atmospheric_absorption_db(reflected_distance, settings.alpha_db_per_km)
     a_gr = ground_attenuation_db(
-        reflected_distance,
+        reflected_horizontal,
         source.height_m,
         receiver_height_m,
         settings.ground_factor,
         settings.frequency_hz,
     )
+    c_met = meteorological_correction_db(
+        reflected_horizontal,
+        source.height_m,
+        receiver_height_m,
+        settings.c0_db,
+    )
     reflection_fraction = min(1.0, max(1e-6, barrier.reflection_percent / 100.0))
     reflection_loss_db = -10.0 * math.log10(reflection_fraction)
 
-    return source.lw_db + source.dc_db - a_div - a_atm - a_gr - reflection_loss_db
+    return source.lw_db + source.dc_db - a_div - a_atm - a_gr - c_met - reflection_loss_db
 
 
 def barrier_attenuation_db(
