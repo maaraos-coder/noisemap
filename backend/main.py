@@ -29,6 +29,7 @@ from noise_app.engine import (
     latlon_to_xy,
     segment_intersection,
     barrier_attenuation_db,
+    iso9613_2024_diffraction_dz_db,
     source_to_point_breakdown,
 )
 
@@ -1201,15 +1202,23 @@ def _building_diffraction_attenuation_db(
     xx = sx + exit_["t"] * vx
     xy = sy + exit_["t"] * vy
 
-    wavelength = 343.0 / max(float(frequency_hz), 1.0)
-
-    def attenuation_from_path(path_length: float) -> float:
-        delta = max(0.0, float(path_length) - direct)
-        if delta <= 0.0:
-            return 0.0
-        fresnel_n = max(0.0, 2.0 * delta / max(wavelength, 1e-9))
-        value = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
-        return min(float(max_attenuation_db), max(0.0, value))
+    def attenuation_from_path(
+        path_length: float,
+        d_source_edge: float,
+        d_edge_receiver: float,
+        *,
+        lateral: bool,
+    ) -> float:
+        delta = float(path_length) - direct
+        return iso9613_2024_diffraction_dz_db(
+            delta,
+            d_source_edge,
+            d_edge_receiver,
+            direct,
+            frequency_hz,
+            lateral=lateral,
+            max_db=max_attenuation_db,
+        )
 
     # Two-edge roof route: source -> roof entry -> roof exit -> receiver.
     roof_path = (
@@ -1217,7 +1226,14 @@ def _building_diffraction_attenuation_db(
         + math.hypot(xx - ex, xy - ey)
         + math.sqrt((rx - xx) ** 2 + (ry - xy) ** 2 + (receiver_z - roof_z) ** 2)
     )
-    roof_att = attenuation_from_path(roof_path)
+    roof_first = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (roof_z - source_z) ** 2)
+    roof_last = math.sqrt((rx - xx) ** 2 + (ry - xy) ** 2 + (receiver_z - roof_z) ** 2)
+    roof_att = attenuation_from_path(
+        roof_path,
+        roof_first,
+        roof_last,
+        lateral=False,
+    )
 
     # Lateral routes follow the footprint boundary between the entry and exit
     # crossings. This models diffraction around the two sides/corners of a
@@ -1237,8 +1253,18 @@ def _building_diffraction_attenuation_db(
     exit_to_receiver = math.sqrt(
         (rx - xx) ** 2 + (ry - xy) ** 2 + (receiver_z - los_exit_z) ** 2
     )
-    side_a_att = attenuation_from_path(source_to_entry + forward + exit_to_receiver)
-    side_b_att = attenuation_from_path(source_to_entry + backward + exit_to_receiver)
+    side_a_att = attenuation_from_path(
+        source_to_entry + forward + exit_to_receiver,
+        source_to_entry,
+        exit_to_receiver,
+        lateral=True,
+    )
+    side_b_att = attenuation_from_path(
+        source_to_entry + backward + exit_to_receiver,
+        source_to_entry,
+        exit_to_receiver,
+        lateral=True,
+    )
 
     # Combine the three diffracted routes energetically instead of choosing
     # a hard minimum. A hard winner-switch creates cusps/"tongues" in the
