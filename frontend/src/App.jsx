@@ -4,9 +4,18 @@ import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/mapl
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 // Deployment sync: keep Vercel production aligned with the latest v3-react-maplibre changes.
 
-const COLORS = [
-  '#2c7bb6', '#00a6ca', '#00ccbc', '#90eb9d',
-  '#ffff8c', '#f9d057', '#f29e2e', '#e76818', '#d7191c'
+const NOISE_COLOR_BANDS = [
+  { min:-Infinity, max:35, color:'#c7e9b4', name:'Verde claro' },
+  { min:35, max:40, color:'#6cc04a', name:'Verde' },
+  { min:40, max:45, color:'#2f9d5d', name:'Verde oscuro' },
+  { min:45, max:50, color:'#ffd400', name:'Amarillo' },
+  { min:50, max:55, color:'#d9a300', name:'Ocre' },
+  { min:55, max:60, color:'#ff8c1a', name:'Naranja' },
+  { min:60, max:65, color:'#f05a28', name:'Cinabrio' },
+  { min:65, max:70, color:'#e51c2a', name:'Carmín' },
+  { min:70, max:75, color:'#b13f7a', name:'Rojo lila' },
+  { min:75, max:80, color:'#4d67b1', name:'Azul' },
+  { min:80, max:Infinity, color:'#363a9a', name:'Azul oscuro' }
 ]
 
 const OSM_STYLE = {
@@ -194,22 +203,16 @@ function distancePairsGeoJSON(pairs) {
   }
 }
 
-function levelColor(value, vmin, vmax) {
-  const t = Math.max(0, Math.min(1, (value - vmin) / Math.max(vmax - vmin, 0.001)))
-  const scaled = t * (COLORS.length - 1)
-  const i = Math.floor(scaled)
-  const j = Math.min(COLORS.length - 1, i + 1)
-  const f = scaled - i
-
-  const rgb = hex => [
+function levelColor(value) {
+  const numeric = Number(value)
+  const band = NOISE_COLOR_BANDS.find(item => numeric >= item.min && numeric < item.max)
+    || NOISE_COLOR_BANDS[NOISE_COLOR_BANDS.length - 1]
+  const hex = band.color
+  return [
     parseInt(hex.slice(1, 3), 16),
     parseInt(hex.slice(3, 5), 16),
     parseInt(hex.slice(5, 7), 16)
   ]
-
-  const a = rgb(COLORS[i])
-  const b = rgb(COLORS[j])
-  return a.map((x, k) => Math.round(x + (b[k] - x) * f))
 }
 
 function rasterDataUrl(levels, vmin, vmax) {
@@ -800,13 +803,10 @@ function App() {
     [result, vmin, vmax]
   )
 
-  const legendTicks = useMemo(() => {
-    const top = Math.ceil(vmax / 5) * 5
-    const bottom = Math.floor(vmin / 5) * 5
-    const ticks = []
-    for (let v = top; v >= bottom; v -= 5) ticks.push(v)
-    return ticks
-  }, [vmin, vmax])
+  const legendTicks = useMemo(
+    () => [85,80,75,70,65,60,55,50,45,40,35],
+    []
+  )
 
   useEffect(() => {
     setDirty(true)
@@ -2610,7 +2610,7 @@ function App() {
               type="raster"
               paint={{
                 'raster-opacity': 0.92,
-                'raster-resampling': 'linear',
+                'raster-resampling': 'nearest',
                 'raster-fade-duration': 0
               }}
             />
