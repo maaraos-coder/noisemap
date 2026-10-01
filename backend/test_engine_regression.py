@@ -179,5 +179,100 @@ class EngineRegressionTests(unittest.TestCase):
         self.assertLessEqual(max(step_changes), 3.0)
 
 
+    def test_second_building_moves_out_of_line_of_sight_smoothly(self):
+        lat0 = 0.0
+        lon0 = 0.0
+
+        def ll(x, y):
+            lat, lon = xy_to_latlon(x, y, lat0, lon0)
+            return [lat, lon]
+
+        source = SourceIn(
+            id="S1",
+            name="Fuente",
+            lat=ll(0, 0)[0],
+            lon=ll(0, 0)[1],
+            height_m=1.5,
+            lw_db=100.0,
+        )
+        r_lat, r_lon = ll(35, 0)
+
+        fixed = BuildingIn(
+            id="B1",
+            name="Edificio 1",
+            points=[ll(8, -4), ll(12, -4), ll(12, 4), ll(8, 4)],
+            height_m=8.0,
+            enabled=True,
+            reflection_percent=20.0,
+        )
+
+        offsets = [0.0, 2.0, 4.0, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0, 10.0]
+        values = []
+
+        for offset in offsets:
+            moved = BuildingIn(
+                id="B2",
+                name="Edificio 2",
+                points=[
+                    ll(20, -5 + offset),
+                    ll(24, -5 + offset),
+                    ll(24, 5 + offset),
+                    ll(20, 5 + offset),
+                ],
+                height_m=10.0,
+                enabled=True,
+                reflection_percent=20.0,
+            )
+
+            attenuation = _buildings_diffraction_attenuation_db(
+                source,
+                r_lat,
+                r_lon,
+                1.5,
+                [fixed, moved],
+                500.0,
+                lat0,
+                lon0,
+                None,
+                0.0,
+                0.0,
+                20.0,
+            )
+            values.append(float(attenuation))
+
+        print("building exit sweep offsets:", offsets)
+        print("building exit sweep attenuation:", values)
+
+        self.assertTrue(all(math.isfinite(v) for v in values))
+        self.assertTrue(all(0.0 <= v <= 20.0 for v in values))
+
+        step_changes = [abs(b - a) for a, b in zip(values, values[1:])]
+        print("building exit sweep step changes:", step_changes)
+
+        # Near the geometric transition where the second footprint stops
+        # intersecting the direct F-R line, the compound solver must not create
+        # a large cusp. A 4 dB guard is intentionally permissive because a real
+        # path family can disappear at the boundary.
+        self.assertLessEqual(max(step_changes), 4.0)
+
+        # Once B2 is clearly outside the direct S-R corridor, the result should
+        # converge to the attenuation produced by B1 alone.
+        single = _buildings_diffraction_attenuation_db(
+            source,
+            r_lat,
+            r_lon,
+            1.5,
+            [fixed],
+            500.0,
+            lat0,
+            lon0,
+            None,
+            0.0,
+            0.0,
+            20.0,
+        )
+        self.assertAlmostEqual(values[-1], float(single), places=6)
+
+
 if __name__ == "__main__":
     unittest.main()
