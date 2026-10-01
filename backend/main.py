@@ -1152,9 +1152,10 @@ def _building_diffraction_attenuation_db(
 
     A building is treated as a closed footprint/volume, not as independent
     barrier segments. If the direct source-receiver segment crosses the
-    footprint below the roof, three competing diffracted paths are evaluated:
-    over the roof and around each side of the footprint. The least attenuated
-    route governs the shadow behind the building.
+    footprint below the roof, three diffracted paths are evaluated: over the
+    roof and around each side of the footprint. Their transmitted energies are
+    combined, which produces a continuous transition when the dominant path
+    shifts from roof to either lateral route.
     """
     if not building.enabled or len(building.points) < 3:
         return 0.0
@@ -1239,7 +1240,16 @@ def _building_diffraction_attenuation_db(
     side_a_att = attenuation_from_path(source_to_entry + forward + exit_to_receiver)
     side_b_att = attenuation_from_path(source_to_entry + backward + exit_to_receiver)
 
-    return min(roof_att, side_a_att, side_b_att)
+    # Combine the three diffracted routes energetically instead of choosing
+    # a hard minimum. A hard winner-switch creates cusps/"tongues" in the
+    # isophones whenever the dominant path changes. The energetic combination
+    # is continuous and also reflects that roof and both lateral paths can
+    # contribute simultaneously. Cap at 0 dB so diffraction never amplifies
+    # the unobstructed field.
+    path_attenuations = (roof_att, side_a_att, side_b_att)
+    relative_energy = sum(10.0 ** (-att / 10.0) for att in path_attenuations)
+    combined_att = -10.0 * math.log10(max(relative_energy, 1e-12))
+    return min(float(max_attenuation_db), max(0.0, combined_att))
 
 
 def _buildings_diffraction_attenuation_db(
