@@ -40,6 +40,10 @@ class Barrier:
     enabled: bool = True
     ground_elevation_m: float = 0.0
     reflection_percent: float = 0.0
+    # Stand-alone barriers have acoustically free vertical ends. Building
+    # facades meet adjacent facades, so their endpoints must not fade to 0 dB.
+    free_end_a: bool = True
+    free_end_b: bool = True
 
 
 @dataclass
@@ -339,9 +343,11 @@ def barrier_attenuation_db(
     if u <= 0.5:
         edge_x, edge_y = ax, ay
         distance_into_shadow = u * wall_length
+        nearest_end_is_free = bool(getattr(barrier, "free_end_a", True))
     else:
         edge_x, edge_y = bx, by
         distance_into_shadow = (1.0 - u) * wall_length
+        nearest_end_is_free = bool(getattr(barrier, "free_end_b", True))
 
     edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
     d1_edge = math.sqrt(
@@ -359,14 +365,19 @@ def barrier_attenuation_db(
     )
     transition_width = max(0.75, 2.5 * fresnel_radius)
 
-    # Smoothly grow attenuation from zero exactly at a barrier end to the
-    # finite-edge diffraction value deeper inside the shadow.
-    q = max(0.0, min(1.0, distance_into_shadow / transition_width))
-    smooth = q * q * (3.0 - 2.0 * q)
-    edge_att = edge_att_full * smooth
+    # A stand-alone screen has a free vertical end, so attenuation must grow
+    # from 0 dB as the receiver enters its geometrical shadow. A building
+    # facade, however, is joined to another facade at the corner: forcing its
+    # attenuation to zero there creates an artificial acoustic leak.
+    if nearest_end_is_free:
+        q = max(0.0, min(1.0, distance_into_shadow / transition_width))
+        smooth = q * q * (3.0 - 2.0 * q)
+        edge_att = edge_att_full * smooth
+    else:
+        edge_att = edge_att_full
 
     # The least-attenuated diffracted route dominates: over the top or around
-    # the nearest end. This naturally rounds the shadow near finite ends.
+    # the nearest vertical edge/corner.
     return min(max_barrier_db, max(0.0, min(top_att, edge_att)))
 
 
