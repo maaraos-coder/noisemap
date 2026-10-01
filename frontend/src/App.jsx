@@ -2756,9 +2756,9 @@ function App() {
               type="line"
               paint={{
                 'line-color': '#6f42c1',
-                'line-width': 2,
+                'line-width': 4,
                 'line-dasharray': [2, 1.5],
-                'line-opacity': 0.85
+                'line-opacity': 0.95
               }}
             />
           </Source>
@@ -2784,9 +2784,22 @@ function App() {
         {layers.barriers && (
           <Source id="barriers" type="geojson" data={barrierData}>
             <Layer
+              id="barriers-casing"
+              type="line"
+              paint={{
+                'line-color': '#35205f',
+                'line-width': 7,
+                'line-opacity': 0.95
+              }}
+            />
+            <Layer
               id="barriers-line"
               type="line"
-              paint={{ 'line-color': '#6f42c1', 'line-width': 4.5 }}
+              paint={{
+                'line-color': '#8a4de0',
+                'line-width': 4.5,
+                'line-opacity': 1
+              }}
             />
           </Source>
         )}
@@ -2805,8 +2818,9 @@ function App() {
               id="buildings-line"
               type="line"
               paint={{
-                'line-color': '#3f4a55',
-                'line-width': 1.4
+                'line-color': '#26313b',
+                'line-width': 3.2,
+                'line-opacity': 0.98
               }}
             />
           </Source>
@@ -2827,8 +2841,8 @@ function App() {
               type="line"
               paint={{
                 'line-color': '#111827',
-                'line-width': 2.2,
-                'line-dasharray': [2, 1]
+                'line-width': 4.5,
+                'line-opacity': 1
               }}
             />
           </Source>
@@ -2840,9 +2854,10 @@ function App() {
               id="building-draft-line"
               type="line"
               paint={{
-                'line-color': '#3f4a55',
-                'line-width': 3,
-                'line-dasharray': [2, 1.5]
+                'line-color': '#26313b',
+                'line-width': 4,
+                'line-dasharray': [2, 1.5],
+                'line-opacity': 1
               }}
             />
           </Source>
@@ -2863,8 +2878,9 @@ function App() {
               type="line"
               paint={{
                 'line-color': '#1f2937',
-                'line-width': 1.5,
-                'line-dasharray': [1.5, 1]
+                'line-width': 3.2,
+                'line-dasharray': [1.5, 1],
+                'line-opacity': 1
               }}
             />
           </Source>
