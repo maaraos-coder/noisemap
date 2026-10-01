@@ -29,3 +29,4 @@ jobs:
           python-version: "3.12"
       - run: pip install -r backend/requirements.txt
       - run: python -m compileall backend noise_app
+      - run: python -m unittest backend/test_engine_regression.py
