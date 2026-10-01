@@ -377,11 +377,96 @@ function cleanDisplayLevels(levels, bounds, sources = [], barriers = []) {
   return out
 }
 
-function rasterDataUrl(levels, vmin, vmax) {
+function barrierCrossingCellMask(levels, bounds, barriers = []) {
+  const mask = new Set()
+  if (!levels?.length || !levels[0]?.length || !bounds || !barriers?.length) return mask
+
+  const rows = levels.length
+  const cols = levels[0].length
+  const south = Number(bounds[0]?.[0])
+  const west = Number(bounds[0]?.[1])
+  const north = Number(bounds[1]?.[0])
+  const east = Number(bounds[1]?.[1])
+  if (![south, west, north, east].every(Number.isFinite)) return mask
+
+  const cross = (ax, ay, bx, by) => ax * by - ay * bx
+  const intersects = (p1, p2, q1, q2) => {
+    const rx = p2[0] - p1[0]
+    const ry = p2[1] - p1[1]
+    const sx = q2[0] - q1[0]
+    const sy = q2[1] - q1[1]
+    const den = cross(rx, ry, sx, sy)
+    if (Math.abs(den) < 1e-14) return false
+    const qpx = q1[0] - p1[0]
+    const qpy = q1[1] - p1[1]
+    const t = cross(qpx, qpy, sx, sy) / den
+    const u = cross(qpx, qpy, rx, ry) / den
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1
+  }
+
+  const rowLat = row => north - (row / Math.max(rows - 1, 1)) * (north - south)
+  const colLon = col => west + (col / Math.max(cols - 1, 1)) * (east - west)
+
+  barriers.filter(item => item?.enabled !== false).forEach(barrier => {
+    const a = [Number(barrier.lon_a), Number(barrier.lat_a)]
+    const b = [Number(barrier.lon_b), Number(barrier.lat_b)]
+    if (![...a, ...b].every(Number.isFinite)) return
+
+    const minLon = Math.min(a[0], b[0])
+    const maxLon = Math.max(a[0], b[0])
+    const minLat = Math.min(a[1], b[1])
+    const maxLat = Math.max(a[1], b[1])
+
+    const col0 = Math.max(0, Math.min(cols - 2, Math.floor((minLon - west) / Math.max(east - west, 1e-12) * (cols - 1)) - 1))
+    const col1 = Math.max(0, Math.min(cols - 2, Math.ceil((maxLon - west) / Math.max(east - west, 1e-12) * (cols - 1)) + 1))
+    const row0 = Math.max(0, Math.min(rows - 2, Math.floor((north - maxLat) / Math.max(north - south, 1e-12) * (rows - 1)) - 1))
+    const row1 = Math.max(0, Math.min(rows - 2, Math.ceil((north - minLat) / Math.max(north - south, 1e-12) * (rows - 1)) + 1))
+
+    for (let row = row0; row <= row1; row += 1) {
+      for (let col = col0; col <= col1; col += 1) {
+        const left = colLon(col)
+        const right = colLon(col + 1)
+        const top = rowLat(row)
+        const bottom = rowLat(row + 1)
+
+        const endpointInside = point => (
+          point[0] >= left && point[0] <= right &&
+          point[1] >= bottom && point[1] <= top
+        )
+        const tl = [left, top]
+        const tr = [right, top]
+        const br = [right, bottom]
+        const bl = [left, bottom]
+        const hit = endpointInside(a) || endpointInside(b) ||
+          intersects(a, b, tl, tr) ||
+          intersects(a, b, tr, br) ||
+          intersects(a, b, br, bl) ||
+          intersects(a, b, bl, tl)
+
+        if (hit) mask.add(`${row}:${col}`)
+      }
+    }
+  })
+
+  return mask
+}
+
+function nearestMatrixValue(levels, x, y) {
+  const rows = levels?.length || 0
+  const cols = rows ? (levels[0]?.length || 0) : 0
+  if (!rows || !cols) return null
+  const col = Math.max(0, Math.min(cols - 1, Math.round(Number(x))))
+  const row = Math.max(0, Math.min(rows - 1, Math.round(Number(y))))
+  const value = Number(levels[row]?.[col])
+  return Number.isFinite(value) ? value : null
+}
+
+function rasterDataUrl(levels, vmin, vmax, bounds = null, barriers = []) {
   if (!levels?.length || !levels[0]?.length) return null
 
   const rows = levels.length
   const cols = levels[0].length
+  const crossingCells = barrierCrossingCellMask(levels, bounds, barriers)
   const scale = 8
   const width = Math.max(2, cols * scale)
   const height = Math.max(2, rows * scale)
@@ -395,7 +480,16 @@ function rasterDataUrl(levels, vmin, vmax) {
     const gy = (py / Math.max(height - 1, 1)) * (rows - 1)
     for (let px = 0; px < width; px += 1) {
       const gx = (px / Math.max(width - 1, 1)) * (cols - 1)
-      const value = bilinearMatrixValue(levels, gx, gy)
+      const cellRow = Math.max(0, Math.min(rows - 2, Math.floor(gy)))
+      const cellCol = Math.max(0, Math.min(cols - 2, Math.floor(gx)))
+      const crossesBarrier = crossingCells.has(`${cellRow}:${cellCol}`)
+
+      // A barrier is a physical discontinuity in the sound field. Do not
+      // bilinearly blend values from opposite sides of a screen, because that
+      // visually leaks high levels into the acoustic shadow.
+      const value = crossesBarrier
+        ? nearestMatrixValue(levels, gx, gy)
+        : bilinearMatrixValue(levels, gx, gy)
       const index = (py * width + px) * 4
 
       if (value == null || !Number.isFinite(value)) {
@@ -415,7 +509,7 @@ function rasterDataUrl(levels, vmin, vmax) {
   return canvas.toDataURL('image/png')
 }
 
-function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
+function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers = []) {
   const empty = { type: 'FeatureCollection', features: [] }
   if (!levels?.length || !levels[0]?.length || !bounds || levels.length < 2 || levels[0].length < 2) return empty
 
@@ -426,6 +520,8 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
   const north = Number(bounds[1]?.[0])
   const east = Number(bounds[1]?.[1])
   if (![south, west, north, east].every(Number.isFinite)) return empty
+
+  const crossingCells = barrierCrossingCellMask(levels, bounds, barriers)
 
   const bottom = Math.ceil(Number(vmin) / interval) * interval
   const top = Math.floor(Number(vmax) / interval) * interval
@@ -450,6 +546,10 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
   thresholds.forEach(threshold => {
     for (let row = 0; row < rows - 1; row += 1) {
       for (let col = 0; col < cols - 1; col += 1) {
+        // Contours must not interpolate through a physical screen. The barrier
+        // layer itself visually closes this narrow gap on the map.
+        if (crossingCells.has(`${row}:${col}`)) continue
+
         const vTL = levels[row]?.[col]
         const vTR = levels[row]?.[col + 1]
         const vBR = levels[row + 1]?.[col + 1]
@@ -967,13 +1067,13 @@ function App() {
   )
 
   const rasterUrl = useMemo(
-    () => rasterDataUrl(displayLevels, vmin, vmax),
-    [displayLevels, vmin, vmax]
+    () => rasterDataUrl(displayLevels, vmin, vmax, result?.bounds, barriers),
+    [displayLevels, vmin, vmax, result, barriers]
   )
 
   const noiseIsolines = useMemo(
-    () => noiseIsolinesGeoJSON(displayLevels, result?.bounds, vmin, vmax, 5),
-    [displayLevels, result, vmin, vmax]
+    () => noiseIsolinesGeoJSON(displayLevels, result?.bounds, vmin, vmax, 5, barriers),
+    [displayLevels, result, vmin, vmax, barriers]
   )
 
   const legendTicks = useMemo(
