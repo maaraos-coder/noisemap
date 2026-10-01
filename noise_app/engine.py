@@ -505,6 +505,96 @@ def barrier_attenuation_db(
     return min(float(max_barrier_db), max(0.0, a_bar))
 
 
+def multiple_barrier_attenuation_db(
+    sx: float,
+    sy: float,
+    sz: float,
+    rx: float,
+    ry: float,
+    rz: float,
+    barriers: list[Barrier],
+    lat0: float,
+    lon0: float,
+    frequency_hz: float,
+    max_barrier_db: float,
+    ground_attenuation_db_value: float = 0.0,
+) -> float:
+    """Compound vertical diffraction path through multiple intersecting screens."""
+    vx, vy = rx - sx, ry - sy
+    direct = math.sqrt(vx * vx + vy * vy + (rz - sz) ** 2)
+    if direct <= 1e-9:
+        return 0.0
+
+    candidates = []
+    for barrier in barriers:
+        if not barrier.enabled or not getattr(barrier, "diffraction_enabled", True):
+            continue
+        ax, ay = latlon_to_xy(barrier.lat_a, barrier.lon_a, lat0, lon0)
+        bx, by = latlon_to_xy(barrier.lat_b, barrier.lon_b, lat0, lon0)
+        hit, t, u = segment_intersection((sx, sy), (rx, ry), (ax, ay), (bx, by))
+        if not hit or t <= 0.0 or t >= 1.0 or u < 0.0 or u > 1.0:
+            continue
+        ix = sx + t * vx
+        iy = sy + t * vy
+        los_z = sz + t * (rz - sz)
+        top_z = barrier.ground_elevation_m + barrier.height_m
+        if top_z <= los_z:
+            continue
+        candidates.append((t, ix, iy, top_z, barrier))
+
+    if not candidates:
+        return 0.0
+
+    candidates.sort(key=lambda item: item[0])
+    if len(candidates) == 1:
+        return barrier_attenuation_db(
+            sx, sy, sz, rx, ry, rz,
+            candidates[0][4],
+            lat0, lon0,
+            frequency_hz=frequency_hz,
+            max_barrier_db=max_barrier_db,
+            ground_attenuation_db_value=ground_attenuation_db_value,
+        )
+
+    points = [(sx, sy, sz)] + [(x, y, z) for _, x, y, z, _ in candidates] + [(rx, ry, rz)]
+    legs = [
+        math.sqrt(
+            (b[0] - a[0]) ** 2 +
+            (b[1] - a[1]) ** 2 +
+            (b[2] - a[2]) ** 2
+        )
+        for a, b in zip(points, points[1:])
+    ]
+    path_length = sum(legs)
+    delta = path_length - direct
+    if delta <= 0.0:
+        return 0.0
+
+    dss = legs[0]
+    dsr = legs[-1]
+    inter_edge = sum(legs[1:-1])
+    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
+
+    if inter_edge > 1e-9:
+        ratio2 = (5.0 * wavelength / inter_edge) ** 2
+        c3 = (1.0 + ratio2) / (1.0 / 3.0 + ratio2)
+    else:
+        c3 = 1.0
+
+    dz = iso9613_2024_diffraction_dz_db(
+        delta,
+        dss,
+        dsr,
+        direct,
+        frequency_hz,
+        lateral=False,
+        c3=c3,
+        e_m=inter_edge,
+        max_db=max_barrier_db,
+    )
+    return max(0.0, dz - max(float(ground_attenuation_db_value), 0.0))
+
+
 def source_to_point_breakdown(
     source: Source,
     receiver_lat: float,
@@ -539,21 +629,23 @@ def source_to_point_breakdown(
         settings.ground_factor,
         settings.frequency_hz,
     )
-    barrier_losses = [
-        barrier_attenuation_db(
-            sx, sy, source_z,
-            rx, ry, receiver_z,
-            b, lat0, lon0,
-            frequency_hz=settings.frequency_hz,
-            max_barrier_db=settings.max_barrier_db,
-            ground_attenuation_db_value=a_gr,
-        )
-        for b in barriers
-        if b.enabled and getattr(b, "diffraction_enabled", True)
-    ]
-    a_bar = max(barrier_losses, default=0.0)
+    a_bar = multiple_barrier_attenuation_db(
+        sx, sy, source_z,
+        rx, ry, receiver_z,
+        barriers,
+        lat0, lon0,
+        frequency_hz=settings.frequency_hz,
+        max_barrier_db=settings.max_barrier_db,
+        ground_attenuation_db_value=a_gr,
+    )
+    c_met = meteorological_correction_db(
+        math.hypot(rx - sx, ry - sy),
+        source.height_m,
+        receiver_height_m,
+        settings.c0_db,
+    )
 
-    lp_direct = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar
+    lp_direct = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar - c_met
 
     reflected_levels = []
     if settings.reflections_enabled:
@@ -568,6 +660,7 @@ def source_to_point_breakdown(
                 lat0,
                 lon0,
                 receiver_ground_elevation_m=receiver_ground_elevation_m,
+                all_barriers=barriers,
             )
             for b in barriers
             if b.enabled and b.reflection_percent > 0.0
@@ -584,6 +677,7 @@ def source_to_point_breakdown(
         "a_atm_db": a_atm,
         "a_gr_db": a_gr,
         "a_bar_db": a_bar,
+        "c_met_db": c_met,
         "lp_direct_db": lp_direct,
         "lp_reflected_db": lp_reflected,
         "reflection_count": len(finite_reflections),
