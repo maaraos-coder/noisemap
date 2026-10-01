@@ -469,6 +469,7 @@ def _settings_for_band(base, band_hz: float) -> PropagationSettings:
         humidity_pct=base.humidity_pct,
         ground_factor=base.ground_factor,
         reflections_enabled=base.reflections_enabled,
+        c0_db=getattr(base, "c0_db", 0.0),
     )
 
 
@@ -1073,6 +1074,7 @@ class GridSettings(BaseModel):
     ground_factor: float = Field(default=0.0, ge=0.0, le=1.0)
     temperature_c: float = 15.0
     humidity_pct: float = Field(default=70.0, ge=0.0, le=100.0)
+    c0_db: float = Field(default=0.0, ge=0.0, le=20.0)
     max_barrier_db: float = 20.0
     reflections_enabled: bool = False
 
@@ -1211,10 +1213,19 @@ def _building_diffraction_attenuation_db(
     if direct <= 1e-9:
         return 0.0
 
-    # Estimate building base elevation at footprint centroid.
-    centroid_lat = sum(float(p[0]) for p in building.points) / len(building.points)
-    centroid_lon = sum(float(p[1]) for p in building.points) / len(building.points)
-    base_z = _terrain_elevation(terrain_samples, centroid_lat, centroid_lon, lat0, lon0)
+    # Resolve building support elevation at the actual entry/exit crossings
+    # instead of using only the footprint centroid. This is more stable on
+    # sloped terrain and keeps the roof geometry tied to the intercepted faces.
+    vx, vy = rx - sx, ry - sy
+    ex = sx + entry["t"] * vx
+    ey = sy + entry["t"] * vy
+    xx = sx + exit_["t"] * vx
+    xy = sy + exit_["t"] * vy
+    entry_lat, entry_lon = xy_to_latlon(ex, ey, lat0, lon0)
+    exit_lat, exit_lon = xy_to_latlon(xx, xy, lat0, lon0)
+    entry_base_z = _terrain_elevation(terrain_samples, entry_lat, entry_lon, lat0, lon0)
+    exit_base_z = _terrain_elevation(terrain_samples, exit_lat, exit_lon, lat0, lon0)
+    base_z = max(entry_base_z, exit_base_z)
     roof_z = base_z + float(building.height_m)
 
     los_entry_z = source_z + entry["t"] * (receiver_z - source_z)
@@ -1870,6 +1881,7 @@ def acoustic_cut(payload: AcousticCutRequest):
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
         reflections_enabled=payload.settings.reflections_enabled,
+        c0_db=payload.settings.c0_db,
     )
     settings.a_weighting = payload.settings.a_weighting
 
@@ -1992,6 +2004,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
         reflections_enabled=payload.settings.reflections_enabled,
+        c0_db=payload.settings.c0_db,
     )
     settings.a_weighting = payload.settings.a_weighting
 
@@ -2050,6 +2063,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
                 "a_atm_db": round(float(diag["a_atm_db"]), 3),
                 "a_gr_db": round(float(diag["a_gr_db"]), 3),
                 "a_bar_db": round(float(diag["a_bar_db"]), 3),
+                "c_met_db": round(float(diag.get("c_met_db", 0.0)), 3),
                 "lp_direct_db": round(float(diag["lp_direct_db"]), 3),
                 "lp_reflected_db": (
                     round(float(diag["lp_reflected_db"]), 3)
@@ -2192,6 +2206,7 @@ def barrier_profile(payload: BarrierProfileRequest):
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
         reflections_enabled=payload.settings.reflections_enabled,
+        c0_db=payload.settings.c0_db,
     )
     profile_settings.a_weighting = payload.settings.a_weighting
 
@@ -2274,6 +2289,7 @@ def calculate(payload: CalculationRequest):
         humidity_pct=payload.settings.humidity_pct,
         ground_factor=payload.settings.ground_factor,
         reflections_enabled=payload.settings.reflections_enabled,
+        c0_db=payload.settings.c0_db,
     )
     settings.a_weighting = payload.settings.a_weighting
 
