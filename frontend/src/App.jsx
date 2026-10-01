@@ -961,6 +961,7 @@ function App() {
     ground_factor: 0,
     temperature_c: 15,
     humidity_pct: 70,
+    c0_db: 0,
     barrier_limit: true,
     vertical_edge_diffraction: true,
     limit_distance: true,
@@ -1192,6 +1193,7 @@ function App() {
             ground_factor: globalSettings.ground_factor,
             temperature_c: globalSettings.temperature_c,
             humidity_pct: globalSettings.humidity_pct,
+            c0_db: globalSettings.c0_db,
             max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
             reflections_enabled: globalSettings.reflection_order !== 'none'
           }
@@ -1518,6 +1520,7 @@ function App() {
         ground_factor: globalSettings.ground_factor,
         temperature_c: globalSettings.temperature_c,
         humidity_pct: globalSettings.humidity_pct,
+        c0_db: globalSettings.c0_db,
         max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
         reflections_enabled: globalSettings.reflection_order !== 'none'
       }
@@ -4447,18 +4450,28 @@ function App() {
               <input type="number" min="0" max="1" step="0.1" value={globalSettings.ground_factor}
                 onChange={e => setGlobalSettings(s => ({ ...s, ground_factor: Number(e.target.value) }))} />
             </label>
-            <div className="future-note">Activo en el motor: G=0 representa suelo duro y G=1 suelo poroso mediante una aproximación educativa del efecto de suelo.</div>
+            <div className="future-note">Activo en el motor: G=0 representa suelo duro y G=1 suelo poroso. El cálculo se realiza por banda con la formulación de efecto de suelo del motor ISO.</div>
           </div>
 
-          <div className="settings-section two-cols">
-            <label>Temperatura [°C]
-              <input type="number" value={globalSettings.temperature_c}
-                onChange={e => setGlobalSettings(s => ({ ...s, temperature_c: Number(e.target.value) }))} />
+          <div className="settings-section">
+            <h4>Meteorología</h4>
+            <div className="two-cols">
+              <label>Temperatura [°C]
+                <input type="number" value={globalSettings.temperature_c}
+                  onChange={e => setGlobalSettings(s => ({ ...s, temperature_c: Number(e.target.value) }))} />
+              </label>
+              <label>Humedad [%]
+                <input type="number" min="0" max="100" value={globalSettings.humidity_pct}
+                  onChange={e => setGlobalSettings(s => ({ ...s, humidity_pct: Number(e.target.value) }))} />
+              </label>
+            </div>
+            <label>C₀ largo plazo [dB]
+              <input type="number" min="0" max="20" step="0.5" value={globalSettings.c0_db}
+                onChange={e => setGlobalSettings(s => ({ ...s, c0_db: Number(e.target.value) }))} />
             </label>
-            <label>Humedad [%]
-              <input type="number" min="0" max="100" value={globalSettings.humidity_pct}
-                onChange={e => setGlobalSettings(s => ({ ...s, humidity_pct: Number(e.target.value) }))} />
-            </label>
+            <div className="future-note">
+              C₀ = 0 mantiene la condición favorable. Valores mayores aplican la corrección meteorológica de largo plazo Cmet según distancia y alturas de fuente/receptor.
+            </div>
           </div>
 
           <div className="settings-section">
@@ -4491,7 +4504,7 @@ function App() {
                 onChange={e => setGlobalSettings(s => ({ ...s, facade_1m: e.target.checked }))} />
               Fachada a 1 m
             </label>
-            <div className="future-note">Activo en el motor: reflexión especular de primer orden mediante fuente imagen. La reflectividad se define en cada barrera.</div>
+            <div className="future-note">Activo en el motor: reflexión especular de primer orden mediante fuente imagen, descartando trayectorias reflejadas bloqueadas por otros obstáculos. La reflectividad se define en cada barrera.</div>
           </div>
 
           <div className="settings-section">
