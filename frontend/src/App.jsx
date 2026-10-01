@@ -215,126 +215,76 @@ function levelColor(value) {
   ]
 }
 
-function rasterDataUrl(levels, vmin, vmax) {
-  if (!levels?.length) return null
+function bilinearMatrixValue(levels, x, y) {
+  const rows = levels?.length || 0
+  const cols = rows ? (levels[0]?.length || 0) : 0
+  if (!rows || !cols) return null
 
-  const height = levels.length
-  const width = levels[0].length
-  const scale = 6
-  const canvas = document.createElement('canvas')
-  canvas.width = width * scale
-  canvas.height = height * scale
-  const ctx = canvas.getContext('2d')
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
+  const xx = Math.max(0, Math.min(cols - 1, Number(x)))
+  const yy = Math.max(0, Math.min(rows - 1, Number(y)))
+  const x0 = Math.floor(xx)
+  const y0 = Math.floor(yy)
+  const x1 = Math.min(cols - 1, x0 + 1)
+  const y1 = Math.min(rows - 1, y0 + 1)
+  const tx = xx - x0
+  const ty = yy - y0
 
-  levels.forEach((row, y) => {
-    row.forEach((value, x) => {
-      if (value === null || Number.isNaN(value)) {
-        ctx.clearRect(x * scale, y * scale, scale, scale)
-        return
-      }
-      const [r, g, b] = levelColor(value, vmin, vmax)
-      ctx.fillStyle = `rgba(${r},${g},${b},0.70)`
-      ctx.fillRect(x * scale, y * scale, scale, scale)
-    })
-  })
+  const samples = [
+    [levels[y0]?.[x0], (1 - tx) * (1 - ty)],
+    [levels[y0]?.[x1], tx * (1 - ty)],
+    [levels[y1]?.[x0], (1 - tx) * ty],
+    [levels[y1]?.[x1], tx * ty]
+  ]
 
-  return canvas.toDataURL('image/png')
-}
-
-
-function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
-  const empty = { type: 'FeatureCollection', features: [] }
-  if (!levels?.length || !levels[0]?.length || !bounds || levels.length < 2 || levels[0].length < 2) return empty
-
-  const rows = levels.length
-  const cols = levels[0].length
-  const south = Number(bounds[0]?.[0])
-  const west = Number(bounds[0]?.[1])
-  const north = Number(bounds[1]?.[0])
-  const east = Number(bounds[1]?.[1])
-  if (![south, west, north, east].every(Number.isFinite)) return empty
-
-  const bottom = Math.ceil(Number(vmin) / interval) * interval
-  const top = Math.floor(Number(vmax) / interval) * interval
-  const thresholds = []
-  for (let value = bottom; value <= top; value += interval) thresholds.push(value)
-
-  const pointAt = (row, col) => ([
-    west + (col / (cols - 1)) * (east - west),
-    north - (row / (rows - 1)) * (north - south)
-  ])
-
-  const interpolate = (p1, v1, p2, v2, threshold) => {
-    const denom = Number(v2) - Number(v1)
-    const t = Math.abs(denom) < 1e-9 ? 0.5 : Math.max(0, Math.min(1, (threshold - Number(v1)) / denom))
-    return [
-      p1[0] + (p2[0] - p1[0]) * t,
-      p1[1] + (p2[1] - p1[1]) * t
-    ]
-  }
-
-  const features = []
-  thresholds.forEach(threshold => {
-    for (let row = 0; row < rows - 1; row += 1) {
-      for (let col = 0; col < cols - 1; col += 1) {
-        const vTL = levels[row]?.[col]
-        const vTR = levels[row]?.[col + 1]
-        const vBR = levels[row + 1]?.[col + 1]
-        const vBL = levels[row + 1]?.[col]
-        if (![vTL, vTR, vBR, vBL].every(v => v != null && Number.isFinite(Number(v)))) continue
-
-        const pTL = pointAt(row, col)
-        const pTR = pointAt(row, col + 1)
-        const pBR = pointAt(row + 1, col + 1)
-        const pBL = pointAt(row + 1, col)
-        const intersections = []
-
-        const cross = (v1, v2) => (
-          (Number(v1) < threshold && Number(v2) >= threshold) ||
-          (Number(v2) < threshold && Number(v1) >= threshold)
-        )
-
-        if (cross(vTL, vTR)) intersections.push({ edge:'top', point:interpolate(pTL, vTL, pTR, vTR, threshold) })
-        if (cross(vTR, vBR)) intersections.push({ edge:'right', point:interpolate(pTR, vTR, pBR, vBR, threshold) })
-        if (cross(vBR, vBL)) intersections.push({ edge:'bottom', point:interpolate(pBR, vBR, pBL, vBL, threshold) })
-        if (cross(vBL, vTL)) intersections.push({ edge:'left', point:interpolate(pBL, vBL, pTL, vTL, threshold) })
-
-        const addSegment = (a, b) => {
-          features.push({
-            type:'Feature',
-            properties:{
-              level_db:threshold,
-              major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0,
-              line_color: (() => {
-                const [r,g,b] = levelColor(threshold, vmin, vmax)
-                // Use exactly the same hue as the acoustic scale.
-                return `rgb(${r},${g},${b})`
-              })()
-            },
-            geometry:{ type:'LineString', coordinates:[a.point, b.point] }
-          })
-        }
-
-        if (intersections.length === 2) {
-          addSegment(intersections[0], intersections[1])
-        } else if (intersections.length === 4) {
-          const byEdge = Object.fromEntries(intersections.map(item => [item.edge, item]))
-          const center = (Number(vTL) + Number(vTR) + Number(vBR) + Number(vBL)) / 4
-          if (center >= threshold) {
-            addSegment(byEdge.top, byEdge.left)
-            addSegment(byEdge.right, byEdge.bottom)
-          } else {
-            addSegment(byEdge.top, byEdge.right)
-            addSegment(byEdge.bottom, byEdge.left)
-          }
-        }
-      }
+  let weighted = 0
+  let totalWeight = 0
+  samples.forEach(([value, weight]) => {
+    const numeric = Number(value)
+    if (value != null && Number.isFinite(numeric) && weight > 0) {
+      weighted += numeric * weight
+      totalWeight += weight
     }
   })
 
-  return { type:'FeatureCollection', features }
+  return totalWeight > 1e-9 ? weighted / totalWeight : null
+}
+
+function rasterDataUrl(levels, vmin, vmax) {
+  if (!levels?.length || !levels[0]?.length) return null
+
+  const rows = levels.length
+  const cols = levels[0].length
+  const scale = 8
+  const width = Math.max(2, cols * scale)
+  const height = Math.max(2, rows * scale)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  const image = ctx.createImageData(width, height)
+
+  for (let py = 0; py < height; py += 1) {
+    const gy = (py / Math.max(height - 1, 1)) * (rows - 1)
+    for (let px = 0; px < width; px += 1) {
+      const gx = (px / Math.max(width - 1, 1)) * (cols - 1)
+      const value = bilinearMatrixValue(levels, gx, gy)
+      const index = (py * width + px) * 4
+
+      if (value == null || !Number.isFinite(value)) {
+        image.data[index + 3] = 0
+        continue
+      }
+
+      const [r, g, b] = levelColor(value, vmin, vmax)
+      image.data[index] = r
+      image.data[index + 1] = g
+      image.data[index + 2] = b
+      image.data[index + 3] = 178
+    }
+  }
+
+  ctx.putImageData(image, 0, 0)
+  return canvas.toDataURL('image/png')
 }
 
 function haversineMeters(aLat, aLon, bLat, bLon) {
@@ -2014,17 +1964,36 @@ function App() {
     ctx.fillStyle = '#f8fafc'
     ctx.fillRect(margin.left, margin.top, plotW, plotH)
 
-    for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < cols; col += 1) {
-        const value = levels[row][col]
-        if (value == null || !Number.isFinite(Number(value))) continue
-        const [r, g, b] = levelColor(Number(value), vmin, vmax)
-        ctx.fillStyle = `rgba(${r},${g},${b},0.78)`
-        const x = margin.left + col * plotW / cols
-        const y = margin.top + row * plotH / rows
-        ctx.fillRect(x, y, plotW / cols + 1, plotH / rows + 1)
+    // Render the acoustic field from the calculated nodes using bilinear
+    // interpolation before applying the 5 dB colour classes. This keeps the
+    // standard discrete palette while removing the visible calculation cells.
+    const fieldCanvas = document.createElement('canvas')
+    const fieldW = Math.max(2, Math.round(plotW))
+    const fieldH = Math.max(2, Math.round(plotH))
+    fieldCanvas.width = fieldW
+    fieldCanvas.height = fieldH
+    const fieldCtx = fieldCanvas.getContext('2d')
+    const fieldImage = fieldCtx.createImageData(fieldW, fieldH)
+
+    for (let py = 0; py < fieldH; py += 1) {
+      const gy = (py / Math.max(fieldH - 1, 1)) * (rows - 1)
+      for (let px = 0; px < fieldW; px += 1) {
+        const gx = (px / Math.max(fieldW - 1, 1)) * (cols - 1)
+        const value = bilinearMatrixValue(levels, gx, gy)
+        const index = (py * fieldW + px) * 4
+        if (value == null || !Number.isFinite(value)) {
+          fieldImage.data[index + 3] = 0
+          continue
+        }
+        const [r, g, b] = levelColor(value, vmin, vmax)
+        fieldImage.data[index] = r
+        fieldImage.data[index + 1] = g
+        fieldImage.data[index + 2] = b
+        fieldImage.data[index + 3] = 205
       }
     }
+    fieldCtx.putImageData(fieldImage, 0, 0)
+    ctx.drawImage(fieldCanvas, margin.left, margin.top, plotW, plotH)
 
     const zMin = Number(cutResult.z_min_m)
     const zMax = Number(cutResult.z_max_m)
@@ -2610,7 +2579,7 @@ function App() {
               type="raster"
               paint={{
                 'raster-opacity': 0.92,
-                'raster-resampling': 'nearest',
+                'raster-resampling': 'linear',
                 'raster-fade-duration': 0
               }}
             />
