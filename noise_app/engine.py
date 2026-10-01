@@ -269,40 +269,103 @@ def barrier_attenuation_db(
     max_barrier_db: float = 20.0,
 ) -> float:
     """
-    Educational single-edge diffraction approximation.
+    Educational finite-screen diffraction approximation.
 
-    This is NOT the full ISO 9613-2 barrier algorithm.
+    The previous model applied attenuation only when the source-receiver ray
+    intersected the finite barrier segment in plan. That produced an abrupt
+    on/off wedge at the two barrier ends. Here the barrier is treated as a
+    finite screen with three candidate diffracting edges: the top edge and
+    the two vertical ends. Inside the geometrical shadow, the least-attenuated
+    diffracted path governs. Just outside an end, a Fresnel-zone transition
+    blends the edge effect back to 0 dB instead of switching instantaneously.
+
+    This remains an educational approximation; it is not the full ISO 9613-2
+    finite-barrier algorithm.
     """
     ax, ay = latlon_to_xy(barrier.lat_a, barrier.lon_a, lat0, lon0)
     bx, by = latlon_to_xy(barrier.lat_b, barrier.lon_b, lat0, lon0)
 
-    hit, t, _ = segment_intersection((sx, sy), (rx, ry), (ax, ay), (bx, by))
-    if not hit:
+    vx, vy = rx - sx, ry - sy
+    wx, wy = bx - ax, by - ay
+    den = _cross(vx, vy, wx, wy)
+    if abs(den) < 1e-9:
         return 0.0
 
-    ix = sx + t * (rx - sx)
-    iy = sy + t * (ry - sy)
-    los_z = sz + t * (rz - sz)
-    barrier_top_z = barrier.ground_elevation_m + barrier.height_m
+    qx, qy = ax - sx, ay - sy
+    t = _cross(qx, qy, wx, wy) / den
+    u = _cross(qx, qy, vx, vy) / den
 
+    # The infinite barrier plane must lie between source and receiver.
+    if t <= 0.0 or t >= 1.0:
+        return 0.0
+
+    ix = sx + t * vx
+    iy = sy + t * vy
+    los_z = sz + t * (rz - sz)
+    barrier_bottom_z = barrier.ground_elevation_m
+    barrier_top_z = barrier_bottom_z + barrier.height_m
+
+    # If the direct line is above the screen, the barrier does not obstruct it.
     if barrier_top_z <= los_z:
         return 0.0
 
+    direct = math.sqrt(vx * vx + vy * vy + (rz - sz) ** 2)
+    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
+
+    def attenuation_from_delta(delta_m: float) -> float:
+        delta_m = max(0.0, float(delta_m))
+        fresnel_n = max(0.0, 2.0 * delta_m / max(wavelength, 1e-9))
+        attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
+        return min(max_barrier_db, max(0.0, attenuation))
+
+    # Top-edge path at the intersection with the barrier plane.
     d1_h = math.hypot(ix - sx, iy - sy)
     d2_h = math.hypot(rx - ix, ry - iy)
-    direct = math.sqrt((rx - sx) ** 2 + (ry - sy) ** 2 + (rz - sz) ** 2)
     via_top = (
         math.sqrt(d1_h**2 + (barrier_top_z - sz) ** 2)
         + math.sqrt(d2_h**2 + (barrier_top_z - rz) ** 2)
     )
-    delta = max(0.0, via_top - direct)
-    if delta <= 0:
+    top_att = attenuation_from_delta(via_top - direct)
+
+    # Vertical end diffraction. The effective diffraction point is taken on
+    # the vertical edge at the source-receiver line-of-sight elevation.
+    edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
+
+    def end_edge_metrics(ex: float, ey: float) -> tuple[float, float, float]:
+        d1 = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (edge_z - sz) ** 2)
+        d2 = math.sqrt((rx - ex) ** 2 + (ry - ey) ** 2 + (rz - edge_z) ** 2)
+        delta = max(0.0, d1 + d2 - direct)
+        att = attenuation_from_delta(delta)
+        fresnel_radius = math.sqrt(
+            max(wavelength * d1 * d2 / max(d1 + d2, 1e-9), 0.0)
+        )
+        return att, fresnel_radius, delta
+
+    a_att, a_rf, _ = end_edge_metrics(ax, ay)
+    b_att, b_rf, _ = end_edge_metrics(bx, by)
+
+    if 0.0 <= u <= 1.0:
+        # In the geometrical shadow the dominant diffracted path is the one
+        # with the smallest insertion loss: over the top or around either end.
+        return min(top_att, a_att, b_att)
+
+    # Outside the projected barrier length there is direct line of sight.
+    # Preserve the finite-edge transition within roughly two Fresnel radii,
+    # then smoothly return to zero attenuation.
+    if u < 0.0:
+        edge_x, edge_y, edge_att, fresnel_radius = ax, ay, a_att, a_rf
+    else:
+        edge_x, edge_y, edge_att, fresnel_radius = bx, by, b_att, b_rf
+
+    lateral_clearance = math.hypot(ix - edge_x, iy - edge_y)
+    transition_width = max(0.5, 2.0 * fresnel_radius)
+    if lateral_clearance >= transition_width:
         return 0.0
 
-    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
-    fresnel_n = max(0.0, 2.0 * delta / wavelength)
-    attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
-    return min(max_barrier_db, max(0.0, attenuation))
+    q = max(0.0, min(1.0, lateral_clearance / transition_width))
+    # Smoothstep gives a continuous slope at both ends of the transition.
+    fade = 1.0 - (q * q * (3.0 - 2.0 * q))
+    return min(max_barrier_db, max(0.0, edge_att * fade))
 
 
 def source_to_point_breakdown(
