@@ -276,12 +276,10 @@ def barrier_attenuation_db(
     """
     Educational finite-screen diffraction approximation.
 
-    A finite barrier is treated with diffraction over the top edge and around
-    its two vertical ends. The geometrical shadow is limited to the projected
-    barrier segment. Near either end, attenuation grows smoothly from 0 dB
-    into the shadow over a Fresnel-scale transition distance, avoiding the
-    artificial radial "horns" created by extending attenuation outside the
-    actual screen.
+    The screen is evaluated through three simultaneous diffraction paths:
+    over the top edge and around both free vertical ends. The transmitted
+    energies of those paths are combined continuously, avoiding artificial
+    winner-switch cusps between top and lateral diffraction.
 
     This remains an educational approximation; it is not the full ISO 9613-2
     finite-barrier algorithm.
@@ -303,13 +301,8 @@ def barrier_attenuation_db(
     t = _cross(qx, qy, wx, wy) / den
     u = _cross(qx, qy, vx, vy) / den
 
-    # The infinite barrier plane must lie between source and receiver.
+    # Barrier plane must lie between source and receiver.
     if t <= 0.0 or t >= 1.0:
-        return 0.0
-
-    # Outside the finite barrier ends there is direct line of sight. Do not
-    # manufacture attenuation beyond the physical screen.
-    if u < 0.0 or u > 1.0:
         return 0.0
 
     ix = sx + t * vx
@@ -326,11 +319,13 @@ def barrier_attenuation_db(
 
     def attenuation_from_delta(delta_m: float) -> float:
         delta_m = max(0.0, float(delta_m))
+        if delta_m <= 0.0:
+            return 0.0
         fresnel_n = max(0.0, 2.0 * delta_m / max(wavelength, 1e-9))
         attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
-        return min(max_barrier_db, max(0.0, attenuation))
+        return min(float(max_barrier_db), max(0.0, attenuation))
 
-    # Diffraction over the top edge at the crossing point.
+    # Top-edge path at the crossing with the barrier plane.
     d1_h = math.hypot(ix - sx, iy - sy)
     d2_h = math.hypot(rx - ix, ry - iy)
     via_top = (
@@ -339,47 +334,68 @@ def barrier_attenuation_db(
     )
     top_att = attenuation_from_delta(via_top - direct)
 
-    # Diffraction around the nearest vertical end. Use the LoS elevation on
-    # that vertical edge, bounded by the physical screen height.
-    if u <= 0.5:
-        edge_x, edge_y = ax, ay
-        distance_into_shadow = u * wall_length
-        nearest_end_is_free = bool(getattr(barrier, "free_end_a", True))
-    else:
-        edge_x, edge_y = bx, by
-        distance_into_shadow = (1.0 - u) * wall_length
-        nearest_end_is_free = bool(getattr(barrier, "free_end_b", True))
-
+    # Evaluate both vertical ends, not just the nearest one.
     edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
-    d1_edge = math.sqrt(
-        (edge_x - sx) ** 2 + (edge_y - sy) ** 2 + (edge_z - sz) ** 2
-    )
-    d2_edge = math.sqrt(
-        (rx - edge_x) ** 2 + (ry - edge_y) ** 2 + (rz - edge_z) ** 2
-    )
-    edge_delta = max(0.0, d1_edge + d2_edge - direct)
-    edge_att_full = attenuation_from_delta(edge_delta)
 
-    # First Fresnel-zone scale for the two legs through the end edge.
-    fresnel_radius = math.sqrt(
-        max(wavelength * d1_edge * d2_edge / max(d1_edge + d2_edge, 1e-9), 0.0)
-    )
-    transition_width = max(0.75, 2.5 * fresnel_radius)
+    def end_path(ex: float, ey: float, free_end: bool, distance_into_shadow: float) -> float:
+        d1 = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (edge_z - sz) ** 2)
+        d2 = math.sqrt((rx - ex) ** 2 + (ry - ey) ** 2 + (rz - edge_z) ** 2)
+        full_att = attenuation_from_delta(d1 + d2 - direct)
 
-    # A stand-alone screen has a free vertical end, so attenuation must grow
-    # from 0 dB as the receiver enters its geometrical shadow. A building
-    # facade, however, is joined to another facade at the corner: forcing its
-    # attenuation to zero there creates an artificial acoustic leak.
-    if nearest_end_is_free:
+        if not free_end:
+            return full_att
+
+        fresnel_radius = math.sqrt(
+            max(wavelength * d1 * d2 / max(d1 + d2, 1e-9), 0.0)
+        )
+        transition_width = max(0.75, 2.5 * fresnel_radius)
         q = max(0.0, min(1.0, distance_into_shadow / transition_width))
         smooth = q * q * (3.0 - 2.0 * q)
-        edge_att = edge_att_full * smooth
-    else:
-        edge_att = edge_att_full
+        return full_att * smooth
 
-    # The least-attenuated diffracted route dominates: over the top or around
-    # the nearest vertical edge/corner.
-    return min(max_barrier_db, max(0.0, min(top_att, edge_att)))
+    # Signed penetration distances relative to each end. Inside the projected
+    # segment both are positive. Outside, the end that has been passed receives
+    # zero penetration and therefore zero end-diffraction attenuation.
+    dist_from_a = max(0.0, min(1.0, u)) * wall_length
+    dist_from_b = max(0.0, min(1.0, 1.0 - u)) * wall_length
+
+    a_att = end_path(
+        ax, ay,
+        bool(getattr(barrier, "free_end_a", True)),
+        dist_from_a,
+    )
+    b_att = end_path(
+        bx, by,
+        bool(getattr(barrier, "free_end_b", True)),
+        dist_from_b,
+    )
+
+    # Outside the physical segment, direct line of sight exists. Retain only a
+    # short Fresnel transition around the nearest end; farther away attenuation
+    # must return to zero.
+    if u < 0.0 or u > 1.0:
+        nearest_att = a_att if u < 0.0 else b_att
+        nearest_x, nearest_y = (ax, ay) if u < 0.0 else (bx, by)
+        clearance = math.hypot(ix - nearest_x, iy - nearest_y)
+
+        d1n = math.sqrt((nearest_x - sx) ** 2 + (nearest_y - sy) ** 2 + (edge_z - sz) ** 2)
+        d2n = math.sqrt((rx - nearest_x) ** 2 + (ry - nearest_y) ** 2 + (rz - edge_z) ** 2)
+        fresnel_radius = math.sqrt(
+            max(wavelength * d1n * d2n / max(d1n + d2n, 1e-9), 0.0)
+        )
+        transition_width = max(0.75, 2.5 * fresnel_radius)
+        if clearance >= transition_width:
+            return 0.0
+        q = max(0.0, min(1.0, clearance / transition_width))
+        fade = 1.0 - q * q * (3.0 - 2.0 * q)
+        return max(0.0, min(float(max_barrier_db), nearest_att * fade))
+
+    # Combine roof + both lateral diffracted paths energetically. Cap at 0 dB
+    # so the barrier cannot amplify the unobstructed field.
+    path_attenuations = (top_att, a_att, b_att)
+    relative_energy = sum(10.0 ** (-att / 10.0) for att in path_attenuations)
+    combined_att = -10.0 * math.log10(max(relative_energy, 1e-12))
+    return min(float(max_barrier_db), max(0.0, combined_att))
 
 
 def source_to_point_breakdown(
