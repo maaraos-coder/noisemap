@@ -287,6 +287,95 @@ function rasterDataUrl(levels, vmin, vmax) {
   return canvas.toDataURL('image/png')
 }
 
+function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
+  const empty = { type: 'FeatureCollection', features: [] }
+  if (!levels?.length || !levels[0]?.length || !bounds || levels.length < 2 || levels[0].length < 2) return empty
+
+  const rows = levels.length
+  const cols = levels[0].length
+  const south = Number(bounds[0]?.[0])
+  const west = Number(bounds[0]?.[1])
+  const north = Number(bounds[1]?.[0])
+  const east = Number(bounds[1]?.[1])
+  if (![south, west, north, east].every(Number.isFinite)) return empty
+
+  const bottom = Math.ceil(Number(vmin) / interval) * interval
+  const top = Math.floor(Number(vmax) / interval) * interval
+  const thresholds = []
+  for (let value = bottom; value <= top; value += interval) thresholds.push(value)
+
+  const pointAt = (row, col) => ([
+    west + (col / (cols - 1)) * (east - west),
+    north - (row / (rows - 1)) * (north - south)
+  ])
+
+  const interpolate = (p1, v1, p2, v2, threshold) => {
+    const denom = Number(v2) - Number(v1)
+    const t = Math.abs(denom) < 1e-9 ? 0.5 : Math.max(0, Math.min(1, (threshold - Number(v1)) / denom))
+    return [
+      p1[0] + (p2[0] - p1[0]) * t,
+      p1[1] + (p2[1] - p1[1]) * t
+    ]
+  }
+
+  const features = []
+  thresholds.forEach(threshold => {
+    for (let row = 0; row < rows - 1; row += 1) {
+      for (let col = 0; col < cols - 1; col += 1) {
+        const vTL = levels[row]?.[col]
+        const vTR = levels[row]?.[col + 1]
+        const vBR = levels[row + 1]?.[col + 1]
+        const vBL = levels[row + 1]?.[col]
+        if (![vTL, vTR, vBR, vBL].every(v => v != null && Number.isFinite(Number(v)))) continue
+
+        const pTL = pointAt(row, col)
+        const pTR = pointAt(row, col + 1)
+        const pBR = pointAt(row + 1, col + 1)
+        const pBL = pointAt(row + 1, col)
+        const intersections = []
+        const cross = (v1, v2) => (
+          (Number(v1) < threshold && Number(v2) >= threshold) ||
+          (Number(v2) < threshold && Number(v1) >= threshold)
+        )
+
+        if (cross(vTL, vTR)) intersections.push({ edge:'top', point:interpolate(pTL, vTL, pTR, vTR, threshold) })
+        if (cross(vTR, vBR)) intersections.push({ edge:'right', point:interpolate(pTR, vTR, pBR, vBR, threshold) })
+        if (cross(vBR, vBL)) intersections.push({ edge:'bottom', point:interpolate(pBR, vBR, pBL, vBL, threshold) })
+        if (cross(vBL, vTL)) intersections.push({ edge:'left', point:interpolate(pBL, vBL, pTL, vTL, threshold) })
+
+        const addSegment = (a, b) => {
+          const [r,g,bv] = levelColor(threshold, vmin, vmax)
+          features.push({
+            type:'Feature',
+            properties:{
+              level_db:threshold,
+              major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0,
+              line_color:`rgb(${r},${g},${bv})`
+            },
+            geometry:{ type:'LineString', coordinates:[a.point, b.point] }
+          })
+        }
+
+        if (intersections.length === 2) {
+          addSegment(intersections[0], intersections[1])
+        } else if (intersections.length === 4) {
+          const byEdge = Object.fromEntries(intersections.map(item => [item.edge, item]))
+          const center = (Number(vTL) + Number(vTR) + Number(vBR) + Number(vBL)) / 4
+          if (center >= threshold) {
+            addSegment(byEdge.top, byEdge.left)
+            addSegment(byEdge.right, byEdge.bottom)
+          } else {
+            addSegment(byEdge.top, byEdge.right)
+            addSegment(byEdge.bottom, byEdge.left)
+          }
+        }
+      }
+    }
+  })
+
+  return { type:'FeatureCollection', features }
+}
+
 function haversineMeters(aLat, aLon, bLat, bLon) {
   const R = 6371000
   const toRad = d => d * Math.PI / 180
