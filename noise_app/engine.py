@@ -424,17 +424,33 @@ def barrier_attenuation_db(
     a_side1 = side_attenuation(ax, ay)
     a_side2 = side_attenuation(bx, by)
 
-    # If the receiver lies outside the projected finite barrier, direct LOS is
-    # not screened by the barrier; only a relevant lateral route can reduce the
-    # barrier effect, never create attenuation by itself.
+    # ISO 9613-2:2024 §7.4.3 relevance criterion:
+    # a lateral path is neglected when the maximum lateral deviation of its
+    # supporting point from the direct S-R line exceeds 8 times the maximum
+    # vertical deviation of the top-path supporting point.
+    horizontal_direct = math.hypot(vx, vy)
+    vertical_deviation = max(0.0, barrier_top_z - los_z)
+
+    def lateral_deviation(ex: float, ey: float) -> float:
+        if horizontal_direct <= 1e-9:
+            return 0.0
+        return abs(_cross(vx, vy, ex - sx, ey - sy)) / horizontal_direct
+
+    lateral_limit = 8.0 * vertical_deviation
+    side1_relevant = lateral_deviation(ax, ay) <= lateral_limit + 1e-9
+    side2_relevant = lateral_deviation(bx, by) <= lateral_limit + 1e-9
+
+    # Outside the projected finite barrier the direct line of sight is not
+    # screened by this barrier.
     if u < 0.0 or u > 1.0:
         return 0.0
 
-    energies = [
-        10.0 ** (-a_top / 10.0),
-        10.0 ** (-a_side1 / 10.0),
-        10.0 ** (-a_side2 / 10.0),
-    ]
+    energies = [10.0 ** (-a_top / 10.0)]
+    if side1_relevant:
+        energies.append(10.0 ** (-a_side1 / 10.0))
+    if side2_relevant:
+        energies.append(10.0 ** (-a_side2 / 10.0))
+
     a_bar = -10.0 * math.log10(max(sum(energies), 1e-12))
     return min(float(max_barrier_db), max(0.0, a_bar))
 
