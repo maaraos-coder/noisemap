@@ -303,7 +303,13 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5) {
             type:'Feature',
             properties:{
               level_db:threshold,
-              major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0
+              major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0,
+              line_color: (() => {
+                const [r,g,b] = levelColor(threshold, vmin, vmax)
+                // Keep the isoline in the same scale hue, slightly darkened
+                // so it remains visible over the translucent raster.
+                return `rgb(${Math.round(r*0.68)},${Math.round(g*0.68)},${Math.round(b*0.68)})`
+              })()
             },
             geometry:{ type:'LineString', coordinates:[a.point, b.point] }
           })
@@ -2619,13 +2625,13 @@ function App() {
               id="noise-isolines-line"
               type="line"
               paint={{
-                'line-color': 'rgba(20,30,40,0.62)',
-                'line-opacity': 0.72,
+                'line-color': ['get', 'line_color'],
+                'line-opacity': 0.92,
                 'line-width': [
                   'case',
                   ['==', ['get', 'major'], 1],
-                  1.35,
-                  0.8
+                  1.45,
+                  0.95
                 ]
               }}
             />
