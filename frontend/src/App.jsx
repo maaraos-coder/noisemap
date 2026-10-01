@@ -304,7 +304,6 @@ function cleanDisplayLevels(levels, bounds, sources = [], barriers = []) {
   const east = Number(bounds[1]?.[1])
   if (![south, west, north, east].every(Number.isFinite)) return levels
 
-  const out = levels.map(row => [...row])
   const meanLat = (south + north) / 2
   const metersPerLat = 111320
   const metersPerLon = 111320 * Math.max(Math.cos(meanLat * Math.PI / 180), 1e-6)
@@ -320,11 +319,10 @@ function cleanDisplayLevels(levels, bounds, sources = [], barriers = []) {
 
   const barrierXY = barriers
     .filter(item => item?.enabled !== false)
-    .map(item => {
-      const a = toXY(item.lat_a, item.lon_a)
-      const b = toXY(item.lat_b, item.lon_b)
-      return { a, b }
-    })
+    .map(item => ({
+      a: toXY(item.lat_a, item.lon_a),
+      b: toXY(item.lat_b, item.lon_b)
+    }))
 
   const pointSegmentDistance = (p, a, b) => {
     const vx = b.x - a.x
@@ -337,44 +335,70 @@ function cleanDisplayLevels(levels, bounds, sources = [], barriers = []) {
 
   const cellDx = Math.abs((east - west) * metersPerLon) / Math.max(cols - 1, 1)
   const cellDy = Math.abs((north - south) * metersPerLat) / Math.max(rows - 1, 1)
-  const nearBarrierDistance = Math.max(4, 1.8 * Math.hypot(cellDx, cellDy))
-  const sourceKeepDistance = Math.max(5, 2.2 * Math.hypot(cellDx, cellDy))
+  const cellDiag = Math.hypot(cellDx, cellDy)
+  const nearBarrierDistance = Math.max(6, 3.2 * cellDiag)
+  const sourceKeepDistance = Math.max(6, 2.5 * cellDiag)
 
-  for (let row = 1; row < rows - 1; row += 1) {
-    for (let col = 1; col < cols - 1; col += 1) {
-      const value = Number(levels[row]?.[col])
-      if (!Number.isFinite(value)) continue
+  let working = levels.map(row => [...row])
 
-      const lat = north - (row / Math.max(rows - 1, 1)) * (north - south)
-      const lon = west + (col / Math.max(cols - 1, 1)) * (east - west)
-      const p = toXY(lat, lon)
+  // Two robust passes are enough to remove a tiny one/two-cell high island
+  // created by gridding next to a barrier, while preserving the large-scale
+  // shadow. Only upward outliers are corrected; real attenuation valleys are
+  // never filled in.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = working.map(row => [...row])
 
-      if (!barrierXY.some(seg => pointSegmentDistance(p, seg.a, seg.b) <= nearBarrierDistance)) continue
-      if (sourceXY.some(src => Math.hypot(p.x - src.x, p.y - src.y) <= sourceKeepDistance)) continue
+    for (let row = 2; row < rows - 2; row += 1) {
+      for (let col = 2; col < cols - 2; col += 1) {
+        const value = Number(working[row]?.[col])
+        if (!Number.isFinite(value)) continue
 
-      const neighbours = []
-      for (let dr = -1; dr <= 1; dr += 1) {
-        for (let dc = -1; dc <= 1; dc += 1) {
-          if (dr === 0 && dc === 0) continue
-          const n = Number(levels[row + dr]?.[col + dc])
-          if (Number.isFinite(n)) neighbours.push(n)
+        const lat = north - (row / Math.max(rows - 1, 1)) * (north - south)
+        const lon = west + (col / Math.max(cols - 1, 1)) * (east - west)
+        const p = toXY(lat, lon)
+
+        if (!barrierXY.some(seg => pointSegmentDistance(p, seg.a, seg.b) <= nearBarrierDistance)) continue
+        if (sourceXY.some(src => Math.hypot(p.x - src.x, p.y - src.y) <= sourceKeepDistance)) continue
+
+        const near = []
+        const wide = []
+        for (let dr = -2; dr <= 2; dr += 1) {
+          for (let dc = -2; dc <= 2; dc += 1) {
+            if (dr === 0 && dc === 0) continue
+            const n = Number(working[row + dr]?.[col + dc])
+            if (!Number.isFinite(n)) continue
+            wide.push(n)
+            if (Math.abs(dr) <= 1 && Math.abs(dc) <= 1) near.push(n)
+          }
+        }
+        if (near.length < 6 || wide.length < 16) continue
+
+        const sortedNear = [...near].sort((a, b) => a - b)
+        const sortedWide = [...wide].sort((a, b) => a - b)
+        const medianNear = sortedNear[Math.floor(sortedNear.length / 2)]
+        const medianWide = sortedWide[Math.floor(sortedWide.length / 2)]
+        const q75Wide = sortedWide[Math.floor(sortedWide.length * 0.75)]
+
+        // A real contour peak has supporting high neighbours. A display
+        // speckle does not. Clamp only when both local medians reject the peak.
+        const highSupport = near.filter(n => n >= value - 1.5).length
+        const isolatedHigh = (
+          value - medianNear >= 2.0 &&
+          value - medianWide >= 2.0 &&
+          value - q75Wide >= 1.0 &&
+          highSupport <= 2
+        )
+
+        if (isolatedHigh) {
+          next[row][col] = Number(Math.max(medianNear, medianWide).toFixed(3))
         }
       }
-      if (neighbours.length < 6) continue
-
-      const sorted = [...neighbours].sort((a, b) => a - b)
-      const median = sorted[Math.floor(sorted.length / 2)]
-      const upperQuartile = sorted[Math.floor(sorted.length * 0.75)]
-
-      // Display-only de-speckling: remove a single-cell peak next to a screen
-      // only when it is clearly unsupported by its neighbourhood. The acoustic
-      // calculation and receiver values remain untouched.
-      if (value - median >= 4.0 && value - upperQuartile >= 2.5) {
-        out[row][col] = Number(median.toFixed(3))
-      }
     }
+
+    working = next
   }
-  return out
+
+  return working
 }
 
 function barrierCrossingCellMask(levels, bounds, barriers = []) {
