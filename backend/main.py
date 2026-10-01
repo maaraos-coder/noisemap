@@ -2216,55 +2216,154 @@ def calculate(payload: CalculationRequest):
         lon0,
     )
 
-    matrix: list[list[Optional[float]]] = []
-    finite: list[float] = []
+    def evaluate_grid_point(lat_f: float, lon_f: float) -> Optional[float]:
+        if not point_in_polygon(lat_f, lon_f, polygon):
+            return None
+        if any(
+            building.enabled
+            and len(building.points) >= 3
+            and point_in_polygon(lat_f, lon_f, building.points)
+            for building in payload.buildings
+        ):
+            return None
 
-    # Returned north -> south so the browser can paint it directly to canvas.
+        receiver_ground = _terrain_elevation(
+            terrain_samples, lat_f, lon_f, lat0, lon0
+        )
+        level = _combined_spectral_level_at_point(
+            all_sources,
+            lat_f,
+            lon_f,
+            payload.settings.receiver_height_m,
+            barriers,
+            settings,
+            lat0,
+            lon0,
+            terrain_samples=terrain_samples,
+            receiver_ground_elevation_m=receiver_ground,
+            source_ground_elevations=source_ground_elevations,
+            buildings=payload.buildings,
+        )
+        return round(float(level), 3) if np.isfinite(level) else None
+
+    # Base acoustic grid.
+    base_matrix: list[list[Optional[float]]] = []
     for lat in reversed(lat_values):
         row: list[Optional[float]] = []
         for lon in lon_values:
-            lat_f = float(lat)
-            lon_f = float(lon)
+            row.append(evaluate_grid_point(float(lat), float(lon)))
+        base_matrix.append(row)
 
-            if not point_in_polygon(lat_f, lon_f, polygon):
-                row.append(None)
-                continue
+    # Adaptive refinement around barrier/building edges. The returned field is
+    # still regular for MapLibre, but the expensive ISO evaluation is repeated
+    # only where strong spatial gradients are expected.
+    obstacle_segments: list[tuple[float, float, float, float]] = []
+    for item in payload.barriers:
+        if item.enabled:
+            ax, ay = latlon_to_xy(item.lat_a, item.lon_a, lat0, lon0)
+            bx, by = latlon_to_xy(item.lat_b, item.lon_b, lat0, lon0)
+            obstacle_segments.append((ax, ay, bx, by))
+    for building in payload.buildings:
+        if not building.enabled or len(building.points) < 3:
+            continue
+        pts_xy = [
+            latlon_to_xy(float(p[0]), float(p[1]), lat0, lon0)
+            for p in building.points if len(p) >= 2
+        ]
+        for idx in range(len(pts_xy)):
+            ax, ay = pts_xy[idx]
+            bx, by = pts_xy[(idx + 1) % len(pts_xy)]
+            obstacle_segments.append((ax, ay, bx, by))
 
-            if any(
-                building.enabled
-                and len(building.points) >= 3
-                and point_in_polygon(lat_f, lon_f, building.points)
-                for building in payload.buildings
-            ):
-                row.append(None)
-                continue
+    def point_segment_distance(px: float, py: float, seg) -> float:
+        ax, ay, bx, by = seg
+        vx, vy = bx - ax, by - ay
+        length2 = vx * vx + vy * vy
+        if length2 <= 1e-12:
+            return math.hypot(px - ax, py - ay)
+        t_seg = max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / length2))
+        qx = ax + t_seg * vx
+        qy = ay + t_seg * vy
+        return math.hypot(px - qx, py - qy)
 
-            receiver_ground = _terrain_elevation(
-                terrain_samples, lat_f, lon_f, lat0, lon0
-            )
-            level = _combined_spectral_level_at_point(
-                all_sources,
-                lat_f,
-                lon_f,
-                payload.settings.receiver_height_m,
-                barriers,
-                settings,
-                lat0,
-                lon0,
-                terrain_samples=terrain_samples,
-                receiver_ground_elevation_m=receiver_ground,
-                source_ground_elevations=source_ground_elevations,
-                buildings=payload.buildings,
-            )
+    def bilinear_base(row_f: float, col_f: float) -> Optional[float]:
+        r0 = max(0, min(n - 1, int(math.floor(row_f))))
+        c0 = max(0, min(n - 1, int(math.floor(col_f))))
+        r1 = min(n - 1, r0 + 1)
+        c1 = min(n - 1, c0 + 1)
+        tr = max(0.0, min(1.0, row_f - r0))
+        tc = max(0.0, min(1.0, col_f - c0))
+        samples = (
+            (base_matrix[r0][c0], (1.0 - tr) * (1.0 - tc)),
+            (base_matrix[r0][c1], (1.0 - tr) * tc),
+            (base_matrix[r1][c0], tr * (1.0 - tc)),
+            (base_matrix[r1][c1], tr * tc),
+        )
+        if any(value is None for value, weight in samples if weight > 1e-9):
+            return None
+        weighted = sum(float(value) * weight for value, weight in samples if value is not None)
+        total = sum(weight for value, weight in samples if value is not None)
+        return round(weighted / total, 3) if total > 1e-9 else None
 
-            if np.isfinite(level):
-                value = round(float(level), 3)
-                finite.append(value)
-                row.append(value)
-            else:
-                row.append(None)
+    matrix = base_matrix
+    if obstacle_segments and n < 100:
+        refined_n = min(100, 2 * n - 1)
 
-        matrix.append(row)
+        x0, y0 = latlon_to_xy(south, west, lat0, lon0)
+        x1, y1 = latlon_to_xy(north, east, lat0, lon0)
+        base_dx = abs(x1 - x0) / max(n - 1, 1)
+        base_dy = abs(y1 - y0) / max(n - 1, 1)
+        base_cell_diag = math.hypot(base_dx, base_dy)
+        refinement_radius_m = max(6.0, min(30.0, 2.5 * base_cell_diag))
+
+        refined_lats = np.linspace(south, north, refined_n)
+        refined_lons = np.linspace(west, east, refined_n)
+        refined_matrix: list[list[Optional[float]]] = []
+
+        for row_index, lat in enumerate(reversed(refined_lats)):
+            refined_row: list[Optional[float]] = []
+            base_row_f = row_index * (n - 1) / max(refined_n - 1, 1)
+            for col_index, lon in enumerate(refined_lons):
+                lat_f = float(lat)
+                lon_f = float(lon)
+                base_col_f = col_index * (n - 1) / max(refined_n - 1, 1)
+
+                if not point_in_polygon(lat_f, lon_f, polygon):
+                    refined_row.append(None)
+                    continue
+                if any(
+                    building.enabled
+                    and len(building.points) >= 3
+                    and point_in_polygon(lat_f, lon_f, building.points)
+                    for building in payload.buildings
+                ):
+                    refined_row.append(None)
+                    continue
+
+                px, py = latlon_to_xy(lat_f, lon_f, lat0, lon0)
+                near_obstacle = any(
+                    point_segment_distance(px, py, segment) <= refinement_radius_m
+                    for segment in obstacle_segments
+                )
+
+                if near_obstacle:
+                    refined_row.append(evaluate_grid_point(lat_f, lon_f))
+                else:
+                    interpolated = bilinear_base(base_row_f, base_col_f)
+                    refined_row.append(
+                        interpolated if interpolated is not None
+                        else evaluate_grid_point(lat_f, lon_f)
+                    )
+            refined_matrix.append(refined_row)
+
+        matrix = refined_matrix
+
+    finite = [
+        float(value)
+        for row in matrix
+        for value in row
+        if value is not None and np.isfinite(value)
+    ]
 
     receiver_results = []
     for receiver in payload.receivers:
