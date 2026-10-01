@@ -1164,6 +1164,50 @@ def _polygon_perimeter_data(points_xy: list[tuple[float, float]]):
     return lengths, cumulative, cumulative[-1]
 
 
+def _point_on_polygon_perimeter(
+    points_xy: list[tuple[float, float]],
+    edge_lengths: list[float],
+    cumulative: list[float],
+    perimeter: float,
+    s_value: float,
+) -> tuple[float, float]:
+    if not points_xy or perimeter <= 1e-9:
+        return (0.0, 0.0)
+    s_mod = float(s_value) % perimeter
+    for i, length in enumerate(edge_lengths):
+        if s_mod <= cumulative[i + 1] + 1e-12:
+            local = 0.0 if length <= 1e-12 else (s_mod - cumulative[i]) / length
+            a = points_xy[i]
+            b = points_xy[(i + 1) % len(points_xy)]
+            return (
+                a[0] + local * (b[0] - a[0]),
+                a[1] + local * (b[1] - a[1]),
+            )
+    return points_xy[-1]
+
+
+def _route_side_sign(
+    points_xy: list[tuple[float, float]],
+    edge_lengths: list[float],
+    cumulative: list[float],
+    perimeter: float,
+    start_s: float,
+    route_length: float,
+    sx: float,
+    sy: float,
+    rx: float,
+    ry: float,
+    direction: int,
+) -> float:
+    if route_length <= 1e-9:
+        return 0.0
+    midpoint_s = start_s + direction * route_length / 2.0
+    px, py = _point_on_polygon_perimeter(
+        points_xy, edge_lengths, cumulative, perimeter, midpoint_s
+    )
+    return (rx - sx) * (py - sy) - (ry - sy) * (px - sx)
+
+
 def _building_diffraction_attenuation_db(
     source,
     receiver_lat: float,
@@ -1233,12 +1277,6 @@ def _building_diffraction_attenuation_db(
     los_exit_z = source_z + exit_["t"] * (receiver_z - source_z)
     if roof_z <= max(los_entry_z, los_exit_z):
         return 0.0
-
-    vx, vy = rx - sx, ry - sy
-    ex = sx + entry["t"] * vx
-    ey = sy + entry["t"] * vy
-    xx = sx + exit_["t"] * vx
-    xy = sy + exit_["t"] * vy
 
     def attenuation_from_path(
         path_length: float,
@@ -1330,13 +1368,108 @@ def _buildings_diffraction_attenuation_db(
     receiver_ground_elevation_m: float,
     max_attenuation_db: float,
 ) -> float:
-    values = [
-        _building_diffraction_attenuation_db(
+    """Compound 3-D screening by one or more building volumes.
+
+    For a single intersected building the detailed roof + two-side model is
+    retained. For several buildings, one ordered roof path and two coherent
+    lateral paths (left/right of the direct S-R axis) are constructed through
+    all intercepted footprints, then combined energetically.
+    """
+    active = [b for b in (buildings or []) if b.enabled and len(b.points) >= 3]
+    if not active:
+        return 0.0
+
+    sx, sy = latlon_to_xy(source.lat, source.lon, lat0, lon0)
+    rx, ry = latlon_to_xy(receiver_lat, receiver_lon, lat0, lon0)
+    source_z = source_ground_elevation_m + float(source.height_m)
+    receiver_z = receiver_ground_elevation_m + float(receiver_height_m)
+    vx, vy = rx - sx, ry - sy
+    direct = math.sqrt(vx * vx + vy * vy + (receiver_z - source_z) ** 2)
+    if direct <= 1e-9:
+        return 0.0
+
+    intercepted = []
+    for building in active:
+        polygon_xy = [
+            latlon_to_xy(float(p[0]), float(p[1]), lat0, lon0)
+            for p in building.points if len(p) >= 2
+        ]
+        if len(polygon_xy) < 3:
+            continue
+
+        crossings = _segment_polygon_crossings_xy(sx, sy, rx, ry, polygon_xy)
+        if len(crossings) < 2:
+            continue
+        entry = crossings[0]
+        exit_ = crossings[-1]
+        if entry["t"] <= 0.0 or exit_["t"] >= 1.0 or entry["t"] >= exit_["t"]:
+            continue
+
+        ex = sx + entry["t"] * vx
+        ey = sy + entry["t"] * vy
+        xx = sx + exit_["t"] * vx
+        xy = sy + exit_["t"] * vy
+        entry_lat, entry_lon = xy_to_latlon(ex, ey, lat0, lon0)
+        exit_lat, exit_lon = xy_to_latlon(xx, xy, lat0, lon0)
+        entry_base = _terrain_elevation(
+            terrain_samples, entry_lat, entry_lon, lat0, lon0
+        )
+        exit_base = _terrain_elevation(
+            terrain_samples, exit_lat, exit_lon, lat0, lon0
+        )
+        roof_z = max(entry_base, exit_base) + float(building.height_m)
+
+        los_entry_z = source_z + entry["t"] * (receiver_z - source_z)
+        los_exit_z = source_z + exit_["t"] * (receiver_z - source_z)
+        if roof_z <= max(los_entry_z, los_exit_z):
+            continue
+
+        edge_lengths, cumulative, perimeter = _polygon_perimeter_data(polygon_xy)
+        if perimeter <= 1e-9:
+            continue
+
+        entry_s = cumulative[entry["edge"]] + entry["u"] * edge_lengths[entry["edge"]]
+        exit_s = cumulative[exit_["edge"]] + exit_["u"] * edge_lengths[exit_["edge"]]
+        forward = (exit_s - entry_s) % perimeter
+        backward = perimeter - forward
+
+        forward_sign = _route_side_sign(
+            polygon_xy, edge_lengths, cumulative, perimeter,
+            entry_s, forward, sx, sy, rx, ry, +1,
+        )
+        backward_sign = _route_side_sign(
+            polygon_xy, edge_lengths, cumulative, perimeter,
+            entry_s, backward, sx, sy, rx, ry, -1,
+        )
+
+        # Preserve coherent left/right families even if polygon winding changes.
+        if forward_sign >= backward_sign:
+            left_detour, right_detour = forward, backward
+        else:
+            left_detour, right_detour = backward, forward
+
+        intercepted.append({
+            "building": building,
+            "entry": entry,
+            "exit": exit_,
+            "entry_xy": (ex, ey),
+            "exit_xy": (xx, xy),
+            "roof_z": roof_z,
+            "los_entry_z": los_entry_z,
+            "los_exit_z": los_exit_z,
+            "left_detour": left_detour,
+            "right_detour": right_detour,
+        })
+
+    if not intercepted:
+        return 0.0
+    if len(intercepted) == 1:
+        return _building_diffraction_attenuation_db(
             source,
             receiver_lat,
             receiver_lon,
             receiver_height_m,
-            building,
+            intercepted[0]["building"],
             frequency_hz,
             lat0,
             lon0,
@@ -1345,11 +1478,112 @@ def _buildings_diffraction_attenuation_db(
             receiver_ground_elevation_m,
             max_attenuation_db,
         )
-        for building in (buildings or [])
-        if building.enabled
+
+    intercepted.sort(key=lambda item: item["entry"]["t"])
+
+    # ---- Compound roof route ----
+    roof_points = [(sx, sy, source_z)]
+    for item in intercepted:
+        ex, ey = item["entry_xy"]
+        xx, xy = item["exit_xy"]
+        roof_points.append((ex, ey, item["roof_z"]))
+        roof_points.append((xx, xy, item["roof_z"]))
+    roof_points.append((rx, ry, receiver_z))
+
+    roof_legs = [
+        math.sqrt(
+            (b[0] - a[0]) ** 2 +
+            (b[1] - a[1]) ** 2 +
+            (b[2] - a[2]) ** 2
+        )
+        for a, b in zip(roof_points, roof_points[1:])
     ]
-    # Same conservative convention currently used for multiple screens.
-    return max(values, default=0.0)
+    roof_path = sum(roof_legs)
+    roof_delta = roof_path - direct
+    roof_intermediate = sum(roof_legs[1:-1])
+    wavelength = 343.0 / max(float(frequency_hz), 1.0)
+    if roof_intermediate > 1e-9:
+        ratio2 = (5.0 * wavelength / roof_intermediate) ** 2
+        roof_c3 = (1.0 + ratio2) / (1.0 / 3.0 + ratio2)
+    else:
+        roof_c3 = 1.0
+
+    roof_att = iso9613_2024_diffraction_dz_db(
+        roof_delta,
+        roof_legs[0],
+        roof_legs[-1],
+        direct,
+        frequency_hz,
+        lateral=False,
+        c3=roof_c3,
+        e_m=roof_intermediate,
+        max_db=max_attenuation_db,
+    )
+
+    # ---- Coherent lateral routes ----
+    first = intercepted[0]
+    last = intercepted[-1]
+    first_ex, first_ey = first["entry_xy"]
+    last_xx, last_xy = last["exit_xy"]
+
+    first_leg = math.sqrt(
+        (first_ex - sx) ** 2 +
+        (first_ey - sy) ** 2 +
+        (first["los_entry_z"] - source_z) ** 2
+    )
+    last_leg = math.sqrt(
+        (rx - last_xx) ** 2 +
+        (ry - last_xy) ** 2 +
+        (receiver_z - last["los_exit_z"]) ** 2
+    )
+
+    gap_length = 0.0
+    for current, nxt in zip(intercepted, intercepted[1:]):
+        cx, cy = current["exit_xy"]
+        nx, ny = nxt["entry_xy"]
+        gap_length += math.sqrt(
+            (nx - cx) ** 2 +
+            (ny - cy) ** 2 +
+            (nxt["los_entry_z"] - current["los_exit_z"]) ** 2
+        )
+
+    left_path = (
+        first_leg +
+        gap_length +
+        last_leg +
+        sum(item["left_detour"] for item in intercepted)
+    )
+    right_path = (
+        first_leg +
+        gap_length +
+        last_leg +
+        sum(item["right_detour"] for item in intercepted)
+    )
+
+    left_att = iso9613_2024_diffraction_dz_db(
+        left_path - direct,
+        first_leg,
+        last_leg,
+        direct,
+        frequency_hz,
+        lateral=True,
+        max_db=max_attenuation_db,
+    )
+    right_att = iso9613_2024_diffraction_dz_db(
+        right_path - direct,
+        first_leg,
+        last_leg,
+        direct,
+        frequency_hz,
+        lateral=True,
+        max_db=max_attenuation_db,
+    )
+
+    path_attenuations = (roof_att, left_att, right_att)
+    relative_energy = sum(10.0 ** (-att / 10.0) for att in path_attenuations)
+    combined_att = -10.0 * math.log10(max(relative_energy, 1e-12))
+    return min(float(max_attenuation_db), max(0.0, combined_att))
+
 
 
 def _barriers_with_buildings(
