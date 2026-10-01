@@ -482,6 +482,7 @@ def _source_spectral_result(
     terrain_samples=None,
     receiver_ground_elevation_m: Optional[float] = None,
     source_ground_elevation_m: Optional[float] = None,
+    buildings=None,
 ):
     adjustment = _source_adjustment_db(source_input)
     if source_ground_elevation_m is None:
@@ -513,7 +514,7 @@ def _source_spectral_result(
             )
             if not emitters:
                 return float("-inf")
-            return level_at_point(
+            lp = level_at_point(
                 emitters,
                 receiver_lat,
                 receiver_lon,
@@ -524,6 +525,29 @@ def _source_spectral_result(
                 lon0,
                 receiver_ground_elevation_m=receiver_ground_elevation_m,
             )
+            # Enclosure face sources can also be screened by buildings.
+            building_losses = [
+                _buildings_diffraction_attenuation_db(
+                    emitter,
+                    receiver_lat,
+                    receiver_lon,
+                    receiver_height_m,
+                    buildings,
+                    frequency_hz,
+                    lat0,
+                    lon0,
+                    terrain_samples,
+                    emitter.ground_elevation_m,
+                    receiver_ground_elevation_m,
+                    base_settings.max_barrier_db,
+                )
+                for emitter in emitters
+            ]
+            # A single combined correction is used for the educational model.
+            # Use the weakest screening among active enclosure-face emitters so
+            # one visible face does not get incorrectly hidden by another.
+            building_att = min(building_losses, default=0.0)
+            return lp - building_att
 
         control_att = _source_control_attenuation_db(
             source_input, frequency_hz, receiver_lat, receiver_lon
@@ -538,7 +562,7 @@ def _source_spectral_result(
             enabled=source_input.enabled,
             ground_elevation_m=source_ground_elevation_m,
         )
-        return level_at_point(
+        lp = level_at_point(
             [source_model],
             receiver_lat,
             receiver_lon,
@@ -549,6 +573,21 @@ def _source_spectral_result(
             lon0,
             receiver_ground_elevation_m=receiver_ground_elevation_m,
         )
+        building_att = _buildings_diffraction_attenuation_db(
+            source_model,
+            receiver_lat,
+            receiver_lon,
+            receiver_height_m,
+            buildings,
+            frequency_hz,
+            lat0,
+            lon0,
+            terrain_samples,
+            source_ground_elevation_m,
+            receiver_ground_elevation_m,
+            base_settings.max_barrier_db,
+        )
+        return lp - building_att
 
     if mode == "octaves":
         bands_db = {}
@@ -615,6 +654,7 @@ def _combined_spectral_level_at_point(
     terrain_samples=None,
     receiver_ground_elevation_m: Optional[float] = None,
     source_ground_elevations=None,
+    buildings=None,
 ):
     totals = []
     for source_input in source_inputs:
@@ -635,6 +675,7 @@ def _combined_spectral_level_at_point(
                 source_ground_elevations.get(source_input.id)
                 if source_ground_elevations is not None else None
             ),
+            buildings=buildings,
         )
         if result["total_db"] is not None and np.isfinite(result["total_db"]):
             totals.append(result["total_db"])
@@ -1059,6 +1100,184 @@ class AcousticCutRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
+def _segment_polygon_crossings_xy(
+    sx: float, sy: float, rx: float, ry: float, polygon_xy: list[tuple[float, float]]
+) -> list[dict]:
+    """Ordered source-receiver crossings with a closed polygon boundary."""
+    crossings = []
+    n = len(polygon_xy)
+    if n < 3:
+        return crossings
+    for i in range(n):
+        a = polygon_xy[i]
+        b = polygon_xy[(i + 1) % n]
+        hit, t, u = segment_intersection((sx, sy), (rx, ry), a, b)
+        if not hit:
+            continue
+        # Merge duplicate vertex hits.
+        if any(abs(t - item["t"]) < 1e-7 for item in crossings):
+            continue
+        crossings.append({"t": float(t), "edge": i, "u": float(u)})
+    return sorted(crossings, key=lambda item: item["t"])
+
+
+def _polygon_perimeter_data(points_xy: list[tuple[float, float]]):
+    lengths = []
+    cumulative = [0.0]
+    n = len(points_xy)
+    for i in range(n):
+        a = points_xy[i]
+        b = points_xy[(i + 1) % n]
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        lengths.append(length)
+        cumulative.append(cumulative[-1] + length)
+    return lengths, cumulative, cumulative[-1]
+
+
+def _building_diffraction_attenuation_db(
+    source,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_height_m: float,
+    building,
+    frequency_hz: float,
+    lat0: float,
+    lon0: float,
+    terrain_samples,
+    source_ground_elevation_m: float,
+    receiver_ground_elevation_m: float,
+    max_attenuation_db: float,
+) -> float:
+    """Finite 3-D building diffraction using roof and both lateral routes.
+
+    A building is treated as a closed footprint/volume, not as independent
+    barrier segments. If the direct source-receiver segment crosses the
+    footprint below the roof, three competing diffracted paths are evaluated:
+    over the roof and around each side of the footprint. The least attenuated
+    route governs the shadow behind the building.
+    """
+    if not building.enabled or len(building.points) < 3:
+        return 0.0
+
+    polygon_xy = [
+        latlon_to_xy(float(p[0]), float(p[1]), lat0, lon0)
+        for p in building.points if len(p) >= 2
+    ]
+    if len(polygon_xy) < 3:
+        return 0.0
+
+    sx, sy = latlon_to_xy(source.lat, source.lon, lat0, lon0)
+    rx, ry = latlon_to_xy(receiver_lat, receiver_lon, lat0, lon0)
+    crossings = _segment_polygon_crossings_xy(sx, sy, rx, ry, polygon_xy)
+    if len(crossings) < 2:
+        return 0.0
+
+    entry = crossings[0]
+    exit_ = crossings[-1]
+    if entry["t"] <= 0.0 or exit_["t"] >= 1.0 or entry["t"] >= exit_["t"]:
+        return 0.0
+
+    source_z = source_ground_elevation_m + float(source.height_m)
+    receiver_z = receiver_ground_elevation_m + float(receiver_height_m)
+    direct = math.sqrt((rx - sx) ** 2 + (ry - sy) ** 2 + (receiver_z - source_z) ** 2)
+    if direct <= 1e-9:
+        return 0.0
+
+    # Estimate building base elevation at footprint centroid.
+    centroid_lat = sum(float(p[0]) for p in building.points) / len(building.points)
+    centroid_lon = sum(float(p[1]) for p in building.points) / len(building.points)
+    base_z = _terrain_elevation(terrain_samples, centroid_lat, centroid_lon, lat0, lon0)
+    roof_z = base_z + float(building.height_m)
+
+    los_entry_z = source_z + entry["t"] * (receiver_z - source_z)
+    los_exit_z = source_z + exit_["t"] * (receiver_z - source_z)
+    if roof_z <= max(los_entry_z, los_exit_z):
+        return 0.0
+
+    vx, vy = rx - sx, ry - sy
+    ex = sx + entry["t"] * vx
+    ey = sy + entry["t"] * vy
+    xx = sx + exit_["t"] * vx
+    xy = sy + exit_["t"] * vy
+
+    wavelength = 343.0 / max(float(frequency_hz), 1.0)
+
+    def attenuation_from_path(path_length: float) -> float:
+        delta = max(0.0, float(path_length) - direct)
+        if delta <= 0.0:
+            return 0.0
+        fresnel_n = max(0.0, 2.0 * delta / max(wavelength, 1e-9))
+        value = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
+        return min(float(max_attenuation_db), max(0.0, value))
+
+    # Two-edge roof route: source -> roof entry -> roof exit -> receiver.
+    roof_path = (
+        math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (roof_z - source_z) ** 2)
+        + math.hypot(xx - ex, xy - ey)
+        + math.sqrt((rx - xx) ** 2 + (ry - xy) ** 2 + (receiver_z - roof_z) ** 2)
+    )
+    roof_att = attenuation_from_path(roof_path)
+
+    # Lateral routes follow the footprint boundary between the entry and exit
+    # crossings. This models diffraction around the two sides/corners of a
+    # closed building instead of treating each facade as an independent screen.
+    edge_lengths, cumulative, perimeter = _polygon_perimeter_data(polygon_xy)
+    if perimeter <= 1e-9:
+        return roof_att
+
+    entry_s = cumulative[entry["edge"]] + entry["u"] * edge_lengths[entry["edge"]]
+    exit_s = cumulative[exit_["edge"]] + exit_["u"] * edge_lengths[exit_["edge"]]
+    forward = (exit_s - entry_s) % perimeter
+    backward = perimeter - forward
+
+    source_to_entry = math.sqrt(
+        (ex - sx) ** 2 + (ey - sy) ** 2 + (los_entry_z - source_z) ** 2
+    )
+    exit_to_receiver = math.sqrt(
+        (rx - xx) ** 2 + (ry - xy) ** 2 + (receiver_z - los_exit_z) ** 2
+    )
+    side_a_att = attenuation_from_path(source_to_entry + forward + exit_to_receiver)
+    side_b_att = attenuation_from_path(source_to_entry + backward + exit_to_receiver)
+
+    return min(roof_att, side_a_att, side_b_att)
+
+
+def _buildings_diffraction_attenuation_db(
+    source,
+    receiver_lat: float,
+    receiver_lon: float,
+    receiver_height_m: float,
+    buildings,
+    frequency_hz: float,
+    lat0: float,
+    lon0: float,
+    terrain_samples,
+    source_ground_elevation_m: float,
+    receiver_ground_elevation_m: float,
+    max_attenuation_db: float,
+) -> float:
+    values = [
+        _building_diffraction_attenuation_db(
+            source,
+            receiver_lat,
+            receiver_lon,
+            receiver_height_m,
+            building,
+            frequency_hz,
+            lat0,
+            lon0,
+            terrain_samples,
+            source_ground_elevation_m,
+            receiver_ground_elevation_m,
+            max_attenuation_db,
+        )
+        for building in (buildings or [])
+        if building.enabled
+    ]
+    # Same conservative convention currently used for multiple screens.
+    return max(values, default=0.0)
+
+
 def _barriers_with_buildings(
     barrier_inputs: List[BarrierIn],
     buildings: List[BuildingIn],
@@ -1120,6 +1339,7 @@ def _barriers_with_buildings(
                 ground_elevation_m=ground,
                 free_end_a=False,
                 free_end_b=False,
+                diffraction_enabled=False,
             ))
 
     return result
@@ -1603,6 +1823,7 @@ def acoustic_cut(payload: AcousticCutRequest):
                 terrain_samples=terrain_samples,
                 receiver_ground_elevation_m=ground,
                 source_ground_elevations=source_ground_elevations,
+                buildings=payload.buildings,
             )
             if np.isfinite(value):
                 value_f = round(float(value), 3)
@@ -1689,6 +1910,7 @@ def receiver_preview(payload: ReceiverPreviewRequest):
             terrain_samples=terrain_samples,
             receiver_ground_elevation_m=receiver_ground_elevation_m,
             source_ground_elevation_m=source_ground_elevations.get(source.id),
+            buildings=payload.buildings,
         )
         contribution_items.append((source, result))
 
@@ -1996,6 +2218,7 @@ def calculate(payload: CalculationRequest):
                 terrain_samples=terrain_samples,
                 receiver_ground_elevation_m=receiver_ground,
                 source_ground_elevations=source_ground_elevations,
+                buildings=payload.buildings,
             )
 
             if np.isfinite(level):
@@ -2032,6 +2255,7 @@ def calculate(payload: CalculationRequest):
                 terrain_samples=terrain_samples,
                 receiver_ground_elevation_m=receiver_ground,
                 source_ground_elevation_m=source_ground_elevations.get(source_input.id),
+                buildings=payload.buildings,
             )
             contribution_items.append((source_input, source_result))
 
