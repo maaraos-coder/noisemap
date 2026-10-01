@@ -293,6 +293,90 @@ function bilinearMatrixValue(levels, x, y) {
   return totalWeight > 1e-9 ? weighted / totalWeight : null
 }
 
+function cleanDisplayLevels(levels, bounds, sources = [], barriers = []) {
+  if (!levels?.length || !levels[0]?.length || !bounds || !barriers?.length) return levels
+
+  const rows = levels.length
+  const cols = levels[0].length
+  const south = Number(bounds[0]?.[0])
+  const west = Number(bounds[0]?.[1])
+  const north = Number(bounds[1]?.[0])
+  const east = Number(bounds[1]?.[1])
+  if (![south, west, north, east].every(Number.isFinite)) return levels
+
+  const out = levels.map(row => [...row])
+  const meanLat = (south + north) / 2
+  const metersPerLat = 111320
+  const metersPerLon = 111320 * Math.max(Math.cos(meanLat * Math.PI / 180), 1e-6)
+
+  const toXY = (lat, lon) => ({
+    x: (Number(lon) - west) * metersPerLon,
+    y: (Number(lat) - south) * metersPerLat
+  })
+
+  const sourceXY = sources
+    .filter(item => item?.enabled !== false)
+    .map(item => toXY(item.lat, item.lon))
+
+  const barrierXY = barriers
+    .filter(item => item?.enabled !== false)
+    .map(item => {
+      const a = toXY(item.lat_a, item.lon_a)
+      const b = toXY(item.lat_b, item.lon_b)
+      return { a, b }
+    })
+
+  const pointSegmentDistance = (p, a, b) => {
+    const vx = b.x - a.x
+    const vy = b.y - a.y
+    const len2 = vx * vx + vy * vy
+    if (len2 <= 1e-12) return Math.hypot(p.x - a.x, p.y - a.y)
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2))
+    return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy))
+  }
+
+  const cellDx = Math.abs((east - west) * metersPerLon) / Math.max(cols - 1, 1)
+  const cellDy = Math.abs((north - south) * metersPerLat) / Math.max(rows - 1, 1)
+  const nearBarrierDistance = Math.max(4, 1.8 * Math.hypot(cellDx, cellDy))
+  const sourceKeepDistance = Math.max(5, 2.2 * Math.hypot(cellDx, cellDy))
+
+  for (let row = 1; row < rows - 1; row += 1) {
+    for (let col = 1; col < cols - 1; col += 1) {
+      const value = Number(levels[row]?.[col])
+      if (!Number.isFinite(value)) continue
+
+      const lat = north - (row / Math.max(rows - 1, 1)) * (north - south)
+      const lon = west + (col / Math.max(cols - 1, 1)) * (east - west)
+      const p = toXY(lat, lon)
+
+      if (!barrierXY.some(seg => pointSegmentDistance(p, seg.a, seg.b) <= nearBarrierDistance)) continue
+      if (sourceXY.some(src => Math.hypot(p.x - src.x, p.y - src.y) <= sourceKeepDistance)) continue
+
+      const neighbours = []
+      for (let dr = -1; dr <= 1; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          if (dr === 0 && dc === 0) continue
+          const n = Number(levels[row + dr]?.[col + dc])
+          if (Number.isFinite(n)) neighbours.push(n)
+        }
+      }
+      if (neighbours.length < 6) continue
+
+      const sorted = [...neighbours].sort((a, b) => a - b)
+      const median = sorted[Math.floor(sorted.length / 2)]
+      const upperQuartile = sorted[Math.floor(sorted.length * 0.75)]
+
+      // Display-only de-speckling: remove a single-cell peak next to a screen
+      // only when it is clearly unsupported by its neighbourhood. The acoustic
+      // calculation and receiver values remain untouched.
+      if (value - median >= 4.0 && value - upperQuartile >= 2.5) {
+        out[row][col] = Number(median.toFixed(3))
+      }
+    }
+  }
+  return out
+}
+
 function rasterDataUrl(levels, vmin, vmax) {
   if (!levels?.length || !levels[0]?.length) return null
 
@@ -877,15 +961,19 @@ function App() {
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
   const draftData = useMemo(() => polygonGeoJSON(draftPolygon), [draftPolygon])
 
-  const rasterUrl = useMemo(
-    () => rasterDataUrl(result?.levels, vmin, vmax),
-    [result, vmin, vmax]
+  const displayLevels = useMemo(
+    () => cleanDisplayLevels(result?.levels, result?.bounds, sources, barriers),
+    [result, sources, barriers]
   )
 
+  const rasterUrl = useMemo(
+    () => rasterDataUrl(displayLevels, vmin, vmax),
+    [displayLevels, vmin, vmax]
+  )
 
   const noiseIsolines = useMemo(
-    () => noiseIsolinesGeoJSON(result?.levels, result?.bounds, vmin, vmax, 5),
-    [result, vmin, vmax]
+    () => noiseIsolinesGeoJSON(displayLevels, result?.bounds, vmin, vmax, 5),
+    [displayLevels, result, vmin, vmax]
   )
 
   const legendTicks = useMemo(
