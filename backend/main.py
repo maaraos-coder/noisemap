@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from pathlib import Path
+from dataclasses import replace
 import io
 import json
 import math
@@ -515,17 +516,32 @@ def _source_spectral_result(
             )
             if not emitters:
                 return float("-inf")
-            lp = level_at_point(
-                emitters,
-                receiver_lat,
-                receiver_lon,
-                receiver_height_m,
-                barriers,
-                band_settings,
-                lat0,
-                lon0,
-                receiver_ground_elevation_m=receiver_ground_elevation_m,
-            )
+            emitter_levels = []
+            for emitter in emitters:
+                path_barriers = _barriers_for_source_receiver_path(
+                    emitter.lat,
+                    emitter.lon,
+                    receiver_lat,
+                    receiver_lon,
+                    barriers,
+                    terrain_samples,
+                    lat0,
+                    lon0,
+                )
+                emitter_levels.append(
+                    level_at_point(
+                        [emitter],
+                        receiver_lat,
+                        receiver_lon,
+                        receiver_height_m,
+                        path_barriers,
+                        band_settings,
+                        lat0,
+                        lon0,
+                        receiver_ground_elevation_m=receiver_ground_elevation_m,
+                    )
+                )
+            lp = energetic_sum_db(emitter_levels)
             # Enclosure face sources can also be screened by buildings.
             building_losses = [
                 _buildings_diffraction_attenuation_db(
@@ -563,12 +579,22 @@ def _source_spectral_result(
             enabled=source_input.enabled,
             ground_elevation_m=source_ground_elevation_m,
         )
+        path_barriers = _barriers_for_source_receiver_path(
+            source_model.lat,
+            source_model.lon,
+            receiver_lat,
+            receiver_lon,
+            barriers,
+            terrain_samples,
+            lat0,
+            lon0,
+        )
         lp = level_at_point(
             [source_model],
             receiver_lat,
             receiver_lon,
             receiver_height_m,
-            barriers,
+            path_barriers,
             band_settings,
             lat0,
             lon0,
@@ -1427,6 +1453,50 @@ def _terrain_elevation(samples, lat: float, lon: float, lat0: float, lon0: float
 
 
 
+def _barriers_for_source_receiver_path(
+    source_lat: float,
+    source_lon: float,
+    receiver_lat: float,
+    receiver_lon: float,
+    barriers: List[Barrier],
+    terrain_samples,
+    lat0: float,
+    lon0: float,
+) -> List[Barrier]:
+    """Return barriers with top geometry referenced to terrain at the exact S-R crossing.
+
+    A long barrier can cross sloped terrain, so using the terrain elevation at
+    its midpoint can give the wrong absolute top elevation for a particular
+    source-receiver ray. Diffraction-enabled screens are therefore cloned with
+    ground elevation evaluated at the actual line intersection. Reflection-only
+    building facades retain their own facade ground reference.
+    """
+    sx, sy = latlon_to_xy(source_lat, source_lon, lat0, lon0)
+    rx, ry = latlon_to_xy(receiver_lat, receiver_lon, lat0, lon0)
+    adjusted: List[Barrier] = []
+
+    for barrier in barriers:
+        if not barrier.enabled or not getattr(barrier, "diffraction_enabled", True):
+            adjusted.append(barrier)
+            continue
+
+        ax, ay = latlon_to_xy(barrier.lat_a, barrier.lon_a, lat0, lon0)
+        bx, by = latlon_to_xy(barrier.lat_b, barrier.lon_b, lat0, lon0)
+        hit, t, u = segment_intersection((sx, sy), (rx, ry), (ax, ay), (bx, by))
+        if not hit or not (0.0 <= t <= 1.0 and 0.0 <= u <= 1.0):
+            adjusted.append(barrier)
+            continue
+
+        hit_lat = float(source_lat) + float(t) * (float(receiver_lat) - float(source_lat))
+        hit_lon = float(source_lon) + float(t) * (float(receiver_lon) - float(source_lon))
+        hit_ground = _terrain_elevation(
+            terrain_samples, hit_lat, hit_lon, lat0, lon0
+        )
+        adjusted.append(replace(barrier, ground_elevation_m=float(hit_ground)))
+
+    return adjusted
+
+
 def _cnossos_vehicle_spectrum(category: str, speed_kmh: float, temperature_c: float) -> np.ndarray:
     ar, br, ap, bp = CNOSSOS_ROAD_F1[category]
     v_true = max(float(speed_kmh), 0.1)
@@ -2028,16 +2098,8 @@ def barrier_profile(payload: BarrierProfileRequest):
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
     source_ground = _terrain_elevation(terrain_samples, s.lat, s.lon, lat0, lon0)
     receiver_ground = _terrain_elevation(terrain_samples, r.lat, r.lon, lat0, lon0)
-    barrier_ground = _terrain_elevation(
-        terrain_samples,
-        (b.lat_a + b.lat_b) / 2.0,
-        (b.lon_a + b.lon_b) / 2.0,
-        lat0,
-        lon0,
-    )
     source_z = source_ground + s.height_m
     receiver_z = receiver_ground + r.height_m
-    barrier_top_z = barrier_ground + b.height_m
 
     sx, sy = latlon_to_xy(s.lat, s.lon, lat0, lon0)
     rx, ry = latlon_to_xy(r.lat, r.lon, lat0, lon0)
@@ -2048,8 +2110,21 @@ def barrier_profile(payload: BarrierProfileRequest):
     hit, t, _ = segment_intersection((sx, sy), (rx, ry), (ax, ay), (bx, by))
 
     if hit:
+        hit_lat = s.lat + t * (r.lat - s.lat)
+        hit_lon = s.lon + t * (r.lon - s.lon)
+        barrier_ground = _terrain_elevation(
+            terrain_samples, hit_lat, hit_lon, lat0, lon0
+        )
         barrier_x = max(0.0, min(horizontal_total, horizontal_total * t))
         los_z = source_z + t * (receiver_z - source_z)
+    else:
+        barrier_ground = _terrain_elevation(
+            terrain_samples,
+            (b.lat_a + b.lat_b) / 2.0,
+            (b.lon_a + b.lon_b) / 2.0,
+            lat0,
+            lon0,
+        )
     else:
         # For visualization only, project barrier midpoint onto the source-receiver axis.
         mx = (ax + bx) / 2.0
@@ -2060,6 +2135,8 @@ def barrier_profile(payload: BarrierProfileRequest):
         proj_t = max(0.0, min(1.0, proj_t))
         barrier_x = horizontal_total * proj_t
         los_z = source_z + proj_t * (receiver_z - source_z)
+
+    barrier_top_z = barrier_ground + b.height_m
 
     d1_h = barrier_x
     d2_h = max(0.0, horizontal_total - barrier_x)
