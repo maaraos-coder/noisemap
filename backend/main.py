@@ -323,9 +323,9 @@ def _face_radiation_dc_db(
     ux, uy, uz = (rx - sx) / distance, (ry - sy) / distance, dz / distance
     nx, ny, nz = face_geometry["normal"]
     cos_theta = nx * ux + ny * uy + nz * uz
-    if cos_theta <= 1e-5:
+    if cos_theta <= 0.0:
         return None
-    q = max(4.0 * cos_theta, 1e-6)
+    q = max(4.0 * cos_theta, 1e-12)
     return 10.0 * math.log10(q)
 
 
@@ -1118,6 +1118,8 @@ def _barriers_with_buildings(
                 enabled=True,
                 reflection_percent=building.reflection_percent,
                 ground_elevation_m=ground,
+                free_end_a=False,
+                free_end_b=False,
             ))
 
     return result
