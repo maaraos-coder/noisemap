@@ -44,6 +44,7 @@ class Barrier:
     # facades meet adjacent facades, so their endpoints must not fade to 0 dB.
     free_end_a: bool = True
     free_end_b: bool = True
+    diffraction_enabled: bool = True
 
 
 @dataclass
@@ -417,7 +418,7 @@ def source_to_point_breakdown(
             max_barrier_db=settings.max_barrier_db,
         )
         for b in barriers
-        if b.enabled
+        if b.enabled and getattr(b, "diffraction_enabled", True)
     ]
     a_bar = max(barrier_losses, default=0.0)
     a_gr = ground_attenuation_db(
