@@ -4552,3 +4552,18 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+
+.barrier-distance-label {
+  border-color: rgba(111,66,193,.42);
+  background: rgba(252,249,255,.96);
+}
+
+.barrier-distance-label strong {
+  color: #5b36a8;
+}
+
+.distance-barrier-row {
+  padding-top: 5px;
+  border-top: 1px dashed #d7dee5;
+}
