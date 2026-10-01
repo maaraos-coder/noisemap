@@ -271,13 +271,12 @@ def barrier_attenuation_db(
     """
     Educational finite-screen diffraction approximation.
 
-    The previous model applied attenuation only when the source-receiver ray
-    intersected the finite barrier segment in plan. That produced an abrupt
-    on/off wedge at the two barrier ends. Here the barrier is treated as a
-    finite screen with three candidate diffracting edges: the top edge and
-    the two vertical ends. Inside the geometrical shadow, the least-attenuated
-    diffracted path governs. Just outside an end, a Fresnel-zone transition
-    blends the edge effect back to 0 dB instead of switching instantaneously.
+    A finite barrier is treated with diffraction over the top edge and around
+    its two vertical ends. The geometrical shadow is limited to the projected
+    barrier segment. Near either end, attenuation grows smoothly from 0 dB
+    into the shadow over a Fresnel-scale transition distance, avoiding the
+    artificial radial "horns" created by extending attenuation outside the
+    actual screen.
 
     This remains an educational approximation; it is not the full ISO 9613-2
     finite-barrier algorithm.
@@ -287,6 +286,10 @@ def barrier_attenuation_db(
 
     vx, vy = rx - sx, ry - sy
     wx, wy = bx - ax, by - ay
+    wall_length = math.hypot(wx, wy)
+    if wall_length < 1e-9:
+        return 0.0
+
     den = _cross(vx, vy, wx, wy)
     if abs(den) < 1e-9:
         return 0.0
@@ -299,13 +302,17 @@ def barrier_attenuation_db(
     if t <= 0.0 or t >= 1.0:
         return 0.0
 
+    # Outside the finite barrier ends there is direct line of sight. Do not
+    # manufacture attenuation beyond the physical screen.
+    if u < 0.0 or u > 1.0:
+        return 0.0
+
     ix = sx + t * vx
     iy = sy + t * vy
     los_z = sz + t * (rz - sz)
     barrier_bottom_z = barrier.ground_elevation_m
     barrier_top_z = barrier_bottom_z + barrier.height_m
 
-    # If the direct line is above the screen, the barrier does not obstruct it.
     if barrier_top_z <= los_z:
         return 0.0
 
@@ -318,7 +325,7 @@ def barrier_attenuation_db(
         attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
         return min(max_barrier_db, max(0.0, attenuation))
 
-    # Top-edge path at the intersection with the barrier plane.
+    # Diffraction over the top edge at the crossing point.
     d1_h = math.hypot(ix - sx, iy - sy)
     d2_h = math.hypot(rx - ix, ry - iy)
     via_top = (
@@ -327,45 +334,40 @@ def barrier_attenuation_db(
     )
     top_att = attenuation_from_delta(via_top - direct)
 
-    # Vertical end diffraction. The effective diffraction point is taken on
-    # the vertical edge at the source-receiver line-of-sight elevation.
-    edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
-
-    def end_edge_metrics(ex: float, ey: float) -> tuple[float, float, float]:
-        d1 = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (edge_z - sz) ** 2)
-        d2 = math.sqrt((rx - ex) ** 2 + (ry - ey) ** 2 + (rz - edge_z) ** 2)
-        delta = max(0.0, d1 + d2 - direct)
-        att = attenuation_from_delta(delta)
-        fresnel_radius = math.sqrt(
-            max(wavelength * d1 * d2 / max(d1 + d2, 1e-9), 0.0)
-        )
-        return att, fresnel_radius, delta
-
-    a_att, a_rf, _ = end_edge_metrics(ax, ay)
-    b_att, b_rf, _ = end_edge_metrics(bx, by)
-
-    if 0.0 <= u <= 1.0:
-        # In the geometrical shadow the dominant diffracted path is the one
-        # with the smallest insertion loss: over the top or around either end.
-        return min(top_att, a_att, b_att)
-
-    # Outside the projected barrier length there is direct line of sight.
-    # Preserve the finite-edge transition within roughly two Fresnel radii,
-    # then smoothly return to zero attenuation.
-    if u < 0.0:
-        edge_x, edge_y, edge_att, fresnel_radius = ax, ay, a_att, a_rf
+    # Diffraction around the nearest vertical end. Use the LoS elevation on
+    # that vertical edge, bounded by the physical screen height.
+    if u <= 0.5:
+        edge_x, edge_y = ax, ay
+        distance_into_shadow = u * wall_length
     else:
-        edge_x, edge_y, edge_att, fresnel_radius = bx, by, b_att, b_rf
+        edge_x, edge_y = bx, by
+        distance_into_shadow = (1.0 - u) * wall_length
 
-    lateral_clearance = math.hypot(ix - edge_x, iy - edge_y)
-    transition_width = max(0.5, 2.0 * fresnel_radius)
-    if lateral_clearance >= transition_width:
-        return 0.0
+    edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
+    d1_edge = math.sqrt(
+        (edge_x - sx) ** 2 + (edge_y - sy) ** 2 + (edge_z - sz) ** 2
+    )
+    d2_edge = math.sqrt(
+        (rx - edge_x) ** 2 + (ry - edge_y) ** 2 + (rz - edge_z) ** 2
+    )
+    edge_delta = max(0.0, d1_edge + d2_edge - direct)
+    edge_att_full = attenuation_from_delta(edge_delta)
 
-    q = max(0.0, min(1.0, lateral_clearance / transition_width))
-    # Smoothstep gives a continuous slope at both ends of the transition.
-    fade = 1.0 - (q * q * (3.0 - 2.0 * q))
-    return min(max_barrier_db, max(0.0, edge_att * fade))
+    # First Fresnel-zone scale for the two legs through the end edge.
+    fresnel_radius = math.sqrt(
+        max(wavelength * d1_edge * d2_edge / max(d1_edge + d2_edge, 1e-9), 0.0)
+    )
+    transition_width = max(0.75, 2.5 * fresnel_radius)
+
+    # Smoothly grow attenuation from zero exactly at a barrier end to the
+    # finite-edge diffraction value deeper inside the shadow.
+    q = max(0.0, min(1.0, distance_into_shadow / transition_width))
+    smooth = q * q * (3.0 - 2.0 * q)
+    edge_att = edge_att_full * smooth
+
+    # The least-attenuated diffracted route dominates: over the top or around
+    # the nearest end. This naturally rounds the shadow near finite ends.
+    return min(max_barrier_db, max(0.0, min(top_att, edge_att)))
 
 
 def source_to_point_breakdown(
