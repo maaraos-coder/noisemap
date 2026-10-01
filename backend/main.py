@@ -2118,6 +2118,7 @@ def barrier_profile(payload: BarrierProfileRequest):
         barrier_x = max(0.0, min(horizontal_total, horizontal_total * t))
         los_z = source_z + t * (receiver_z - source_z)
     else:
+        # For visualization only, project barrier midpoint onto the source-receiver axis.
         barrier_ground = _terrain_elevation(
             terrain_samples,
             (b.lat_a + b.lat_b) / 2.0,
@@ -2125,8 +2126,6 @@ def barrier_profile(payload: BarrierProfileRequest):
             lat0,
             lon0,
         )
-    else:
-        # For visualization only, project barrier midpoint onto the source-receiver axis.
         mx = (ax + bx) / 2.0
         my = (ay + by) / 2.0
         vx, vy = rx - sx, ry - sy
