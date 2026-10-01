@@ -90,23 +90,108 @@ def ground_attenuation_db(
     source_height_m: float,
     receiver_height_m: float,
     ground_factor: float,
+    frequency_hz: float = 500.0,
 ) -> float:
-    """Educational ISO 9613-2 alternative ground-effect approximation.
+    """ISO 9613-2:2024 §7.3.1 general ground-effect method.
 
-    G=0 represents acoustically hard ground and produces no ground attenuation.
-    G=1 applies the porous-ground alternative expression. Intermediate G values
-    interpolate linearly. This intentionally remains a simplified teaching
-    model rather than the full octave-band source/middle/receiver-region method.
+    A single ground factor G is currently used for source, middle and receiver
+    regions. G=0 hard ground, G=1 porous ground, intermediate values mixed.
     """
+    dp = max(float(distance_m), 1e-6)
+    hs = max(float(source_height_m), 0.0)
+    hr = max(float(receiver_height_m), 0.0)
     g = min(1.0, max(0.0, float(ground_factor)))
-    if g <= 0.0:
+
+    # ISO nominal octave bands are used for the tabulated ground terms.
+    bands = (63, 125, 250, 500, 1000, 2000, 4000, 8000)
+    f = min(bands, key=lambda b: abs(math.log(max(float(frequency_hz), 1.0) / b)))
+
+    def aprime(h: float) -> float:
+        return (
+            1.5
+            + 3.0 * math.exp(-0.12 * (h - 5.0) ** 2) * (1.0 - math.exp(-dp / 50.0))
+            + 5.7 * math.exp(-0.09 * h * h) * (1.0 - math.exp(-2.8e-6 * dp * dp))
+        )
+
+    def bprime(h: float) -> float:
+        return 1.5 + 8.6 * math.exp(-0.09 * h * h) * (1.0 - math.exp(-dp / 50.0))
+
+    def cprime(h: float) -> float:
+        return 1.5 + 14.0 * math.exp(-0.46 * h * h) * (1.0 - math.exp(-dp / 50.0))
+
+    def dprime(h: float) -> float:
+        return 1.5 + 5.0 * math.exp(-0.9 * h * h) * (1.0 - math.exp(-dp / 50.0))
+
+    def end_region(h: float) -> float:
+        if f == 63:
+            return -1.5
+        if f == 125:
+            return -1.5 + g * aprime(h)
+        if f == 250:
+            return -1.5 + g * bprime(h)
+        if f == 500:
+            return -1.5 + g * cprime(h)
+        if f == 1000:
+            return -1.5 + g * dprime(h)
+        return -1.5 * (1.0 - g)
+
+    q = 0.0
+    if dp > 30.0 * (hs + hr):
+        q = 1.0 - 30.0 * (hs + hr) / dp
+
+    a_s = end_region(hs)
+    a_r = end_region(hr)
+    if f == 63:
+        a_m = -3.0 * q
+    else:
+        a_m = -3.0 * q * (1.0 - g)
+
+    a_prime = a_s + a_r + a_m
+
+    # ISO 9613-2:2024 Formulae (11)-(13): geometry correction makes the
+    # ground influence vanish for very short horizontal source-receiver spans.
+    k_geo = (
+        dp * dp + (hs - hr) ** 2
+    ) / max(dp * dp + (hs + hr) ** 2, 1e-12)
+    energy_factor = 1.0 + (10.0 ** (-a_prime / 10.0) - 1.0) * k_geo
+    return -10.0 * math.log10(max(energy_factor, 1e-12))
+
+
+def iso9613_2024_diffraction_dz_db(
+    path_difference_m: float,
+    d_source_edge_m: float,
+    d_edge_receiver_m: float,
+    direct_distance_m: float,
+    frequency_hz: float,
+    *,
+    lateral: bool = False,
+    c2: float = 20.0,
+    c3: float = 1.0,
+    e_m: float = 0.0,
+    max_db: float = 20.0,
+) -> float:
+    """ISO 9613-2:2024 §7.4.1 barrier attenuation Dz, Formulae (18)-(21)."""
+    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
+    z = float(path_difference_m)
+    z_min = -2.0 * wavelength / max(c2 * c3, 1e-12)
+    if z <= z_min:
         return 0.0
 
-    d = max(float(distance_m), 1.0)
-    hm = max(0.0, (float(source_height_m) + float(receiver_height_m)) / 2.0)
-    porous = 4.8 - (2.0 * hm / d) * (17.0 + 300.0 / d)
-    return g * max(0.0, min(4.8, porous))
+    if lateral:
+        k_met = 1.0
+    else:
+        denom = max(2.0 * (z - z_min), 1e-12)
+        geometric = (
+            (max(float(d_source_edge_m), float(d_edge_receiver_m)) + max(float(e_m), 0.0))
+            * min(float(d_source_edge_m), float(d_edge_receiver_m))
+            * max(float(direct_distance_m), 0.0)
+            / denom
+        )
+        k_met = math.exp(-(1.0 / 2000.0) * math.sqrt(max(geometric, 0.0)))
 
+    argument = 1.0 + (2.0 + (c2 / wavelength) * c3 * z) * k_met
+    dz = 10.0 * math.log10(max(argument, 1.0))
+    return min(float(max_db), max(0.0, dz))
 
 
 def atmospheric_absorption_iso9613_db_per_m(
@@ -253,6 +338,7 @@ def first_order_reflection_level_db(
         source.height_m,
         receiver_height_m,
         settings.ground_factor,
+        settings.frequency_hz,
     )
     reflection_fraction = min(1.0, max(1e-6, barrier.reflection_percent / 100.0))
     reflection_loss_db = -10.0 * math.log10(reflection_fraction)
@@ -272,17 +358,13 @@ def barrier_attenuation_db(
     lon0: float,
     frequency_hz: float = 500.0,
     max_barrier_db: float = 20.0,
+    ground_attenuation_db_value: float = 0.0,
 ) -> float:
-    """
-    Educational finite-screen diffraction approximation.
+    """ISO 9613-2:2024 §7.4 finite single-barrier screening.
 
-    The screen is evaluated through three simultaneous diffraction paths:
-    over the top edge and around both free vertical ends. The transmitted
-    energies of those paths are combined continuously, avoiding artificial
-    winner-switch cusps between top and lateral diffraction.
-
-    This remains an educational approximation; it is not the full ISO 9613-2
-    finite-barrier algorithm.
+    Top diffraction uses the 2024 Dz and Kmet formulation. Lateral diffraction
+    around both vertical ends uses Kmet=1 and the three paths are combined
+    energetically according to Formula (25).
     """
     ax, ay = latlon_to_xy(barrier.lat_a, barrier.lon_a, lat0, lon0)
     bx, by = latlon_to_xy(barrier.lat_b, barrier.lon_b, lat0, lon0)
@@ -300,102 +382,61 @@ def barrier_attenuation_db(
     qx, qy = ax - sx, ay - sy
     t = _cross(qx, qy, wx, wy) / den
     u = _cross(qx, qy, vx, vy) / den
-
-    # Barrier plane must lie between source and receiver.
     if t <= 0.0 or t >= 1.0:
         return 0.0
 
     ix = sx + t * vx
     iy = sy + t * vy
     los_z = sz + t * (rz - sz)
-    barrier_bottom_z = barrier.ground_elevation_m
-    barrier_top_z = barrier_bottom_z + barrier.height_m
-
+    barrier_top_z = barrier.ground_elevation_m + barrier.height_m
     if barrier_top_z <= los_z:
         return 0.0
 
     direct = math.sqrt(vx * vx + vy * vy + (rz - sz) ** 2)
-    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
 
-    def attenuation_from_delta(delta_m: float) -> float:
-        delta_m = max(0.0, float(delta_m))
-        if delta_m <= 0.0:
+    # Vertical-plane path over the top edge.
+    dss_top = math.sqrt((ix - sx) ** 2 + (iy - sy) ** 2 + (barrier_top_z - sz) ** 2)
+    dsr_top = math.sqrt((rx - ix) ** 2 + (ry - iy) ** 2 + (rz - barrier_top_z) ** 2)
+    z_top = dss_top + dsr_top - direct
+    dz_top = iso9613_2024_diffraction_dz_db(
+        z_top, dss_top, dsr_top, direct, frequency_hz,
+        lateral=False, max_db=max_barrier_db,
+    )
+    # Formula (16)/(17): positive ground attenuation is replaced by top-edge
+    # screening, while negative ground effect is not subtracted.
+    a_top = max(0.0, dz_top - max(float(ground_attenuation_db_value), 0.0))
+
+    # ISO lateral paths around the two vertical end edges. At lateral edges
+    # Kmet=1. A side path is relevant when it is longer than the direct path.
+    edge_z = min(max(los_z, barrier.ground_elevation_m), barrier_top_z)
+
+    def side_attenuation(ex: float, ey: float) -> float:
+        dss = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (edge_z - sz) ** 2)
+        dsr = math.sqrt((rx - ex) ** 2 + (ry - ey) ** 2 + (rz - edge_z) ** 2)
+        z_side = dss + dsr - direct
+        if z_side <= 0.0:
             return 0.0
-        fresnel_n = max(0.0, 2.0 * delta_m / max(wavelength, 1e-9))
-        attenuation = 10.0 * math.log10(3.0 + 20.0 * fresnel_n)
-        return min(float(max_barrier_db), max(0.0, attenuation))
-
-    # Top-edge path at the crossing with the barrier plane.
-    d1_h = math.hypot(ix - sx, iy - sy)
-    d2_h = math.hypot(rx - ix, ry - iy)
-    via_top = (
-        math.sqrt(d1_h**2 + (barrier_top_z - sz) ** 2)
-        + math.sqrt(d2_h**2 + (barrier_top_z - rz) ** 2)
-    )
-    top_att = attenuation_from_delta(via_top - direct)
-
-    # Evaluate both vertical ends, not just the nearest one.
-    edge_z = min(max(los_z, barrier_bottom_z), barrier_top_z)
-
-    def end_path(ex: float, ey: float, free_end: bool, distance_into_shadow: float) -> float:
-        d1 = math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2 + (edge_z - sz) ** 2)
-        d2 = math.sqrt((rx - ex) ** 2 + (ry - ey) ** 2 + (rz - edge_z) ** 2)
-        full_att = attenuation_from_delta(d1 + d2 - direct)
-
-        if not free_end:
-            return full_att
-
-        fresnel_radius = math.sqrt(
-            max(wavelength * d1 * d2 / max(d1 + d2, 1e-9), 0.0)
+        return iso9613_2024_diffraction_dz_db(
+            z_side, dss, dsr, direct, frequency_hz,
+            lateral=True, max_db=max_barrier_db,
         )
-        transition_width = max(0.75, 2.5 * fresnel_radius)
-        q = max(0.0, min(1.0, distance_into_shadow / transition_width))
-        smooth = q * q * (3.0 - 2.0 * q)
-        return full_att * smooth
 
-    # Signed penetration distances relative to each end. Inside the projected
-    # segment both are positive. Outside, the end that has been passed receives
-    # zero penetration and therefore zero end-diffraction attenuation.
-    dist_from_a = max(0.0, min(1.0, u)) * wall_length
-    dist_from_b = max(0.0, min(1.0, 1.0 - u)) * wall_length
+    a_side1 = side_attenuation(ax, ay)
+    a_side2 = side_attenuation(bx, by)
 
-    a_att = end_path(
-        ax, ay,
-        bool(getattr(barrier, "free_end_a", True)),
-        dist_from_a,
-    )
-    b_att = end_path(
-        bx, by,
-        bool(getattr(barrier, "free_end_b", True)),
-        dist_from_b,
-    )
-
-    # Outside the physical segment, direct line of sight exists. Retain only a
-    # short Fresnel transition around the nearest end; farther away attenuation
-    # must return to zero.
+    # If the receiver lies outside the projected finite barrier, direct LOS is
+    # not screened by the barrier; only a relevant lateral route can reduce the
+    # barrier effect, never create attenuation by itself.
     if u < 0.0 or u > 1.0:
-        nearest_att = a_att if u < 0.0 else b_att
-        nearest_x, nearest_y = (ax, ay) if u < 0.0 else (bx, by)
-        clearance = math.hypot(ix - nearest_x, iy - nearest_y)
+        return 0.0
 
-        d1n = math.sqrt((nearest_x - sx) ** 2 + (nearest_y - sy) ** 2 + (edge_z - sz) ** 2)
-        d2n = math.sqrt((rx - nearest_x) ** 2 + (ry - nearest_y) ** 2 + (rz - edge_z) ** 2)
-        fresnel_radius = math.sqrt(
-            max(wavelength * d1n * d2n / max(d1n + d2n, 1e-9), 0.0)
-        )
-        transition_width = max(0.75, 2.5 * fresnel_radius)
-        if clearance >= transition_width:
-            return 0.0
-        q = max(0.0, min(1.0, clearance / transition_width))
-        fade = 1.0 - q * q * (3.0 - 2.0 * q)
-        return max(0.0, min(float(max_barrier_db), nearest_att * fade))
-
-    # Combine roof + both lateral diffracted paths energetically. Cap at 0 dB
-    # so the barrier cannot amplify the unobstructed field.
-    path_attenuations = (top_att, a_att, b_att)
-    relative_energy = sum(10.0 ** (-att / 10.0) for att in path_attenuations)
-    combined_att = -10.0 * math.log10(max(relative_energy, 1e-12))
-    return min(float(max_barrier_db), max(0.0, combined_att))
+    energies = [
+        10.0 ** (-a_top / 10.0),
+        10.0 ** (-a_side1 / 10.0),
+        10.0 ** (-a_side2 / 10.0),
+    ]
+    a_bar = -10.0 * math.log10(max(sum(energies), 1e-12))
+    return min(float(max_barrier_db), max(0.0, a_bar))
 
 
 def source_to_point_breakdown(
@@ -425,6 +466,13 @@ def source_to_point_breakdown(
     a_div = geometric_divergence_db(distance_m)
     a_atm = atmospheric_absorption_db(distance_m, settings.alpha_db_per_km)
 
+    a_gr = ground_attenuation_db(
+        math.hypot(rx - sx, ry - sy),
+        source.height_m,
+        receiver_height_m,
+        settings.ground_factor,
+        settings.frequency_hz,
+    )
     barrier_losses = [
         barrier_attenuation_db(
             sx, sy, source_z,
@@ -432,17 +480,12 @@ def source_to_point_breakdown(
             b, lat0, lon0,
             frequency_hz=settings.frequency_hz,
             max_barrier_db=settings.max_barrier_db,
+            ground_attenuation_db_value=a_gr,
         )
         for b in barriers
         if b.enabled and getattr(b, "diffraction_enabled", True)
     ]
     a_bar = max(barrier_losses, default=0.0)
-    a_gr = ground_attenuation_db(
-        distance_m,
-        source.height_m,
-        receiver_height_m,
-        settings.ground_factor,
-    )
 
     lp_direct = source.lw_db + source.dc_db - a_div - a_atm - a_gr - a_bar
 
