@@ -9,6 +9,7 @@ from noise_app.engine import (
     xy_to_latlon,
 )
 
+from backend.main import BuildingIn, SourceIn, _buildings_diffraction_attenuation_db
 
 class EngineRegressionTests(unittest.TestCase):
     def test_geometric_divergence_at_10_m(self):
@@ -51,6 +52,61 @@ class EngineRegressionTests(unittest.TestCase):
         self.assertGreater(attenuation, 0.0)
         self.assertLessEqual(attenuation, 20.0)
 
+
+    def test_compound_two_building_path_is_finite(self):
+        lat0 = 0.0
+        lon0 = 0.0
+
+        def ll(x, y):
+            lat, lon = xy_to_latlon(x, y, lat0, lon0)
+            return [lat, lon]
+
+        buildings = [
+            BuildingIn(
+                id="B1",
+                name="Edificio 1",
+                points=[ll(8, -4), ll(12, -4), ll(12, 4), ll(8, 4)],
+                height_m=8.0,
+                enabled=True,
+                reflection_percent=20.0,
+            ),
+            BuildingIn(
+                id="B2",
+                name="Edificio 2",
+                points=[ll(18, -5), ll(22, -5), ll(22, 5), ll(18, 5)],
+                height_m=10.0,
+                enabled=True,
+                reflection_percent=20.0,
+            ),
+        ]
+        source = SourceIn(
+            id="S1",
+            name="Fuente",
+            lat=ll(0, 0)[0],
+            lon=ll(0, 0)[1],
+            height_m=1.5,
+            lw_db=100.0,
+        )
+        r_lat, r_lon = ll(30, 0)
+
+        attenuation = _buildings_diffraction_attenuation_db(
+            source,
+            r_lat,
+            r_lon,
+            1.5,
+            buildings,
+            500.0,
+            lat0,
+            lon0,
+            None,
+            0.0,
+            0.0,
+            20.0,
+        )
+
+        self.assertTrue(math.isfinite(attenuation))
+        self.assertGreater(attenuation, 0.0)
+        self.assertLessEqual(attenuation, 20.0)
 
 if __name__ == "__main__":
     unittest.main()
