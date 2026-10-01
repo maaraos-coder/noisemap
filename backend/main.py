@@ -28,6 +28,7 @@ from noise_app.engine import (
     level_at_point,
     point_in_polygon,
     latlon_to_xy,
+    xy_to_latlon,
     segment_intersection,
     barrier_attenuation_db,
     iso9613_2024_diffraction_dz_db,
