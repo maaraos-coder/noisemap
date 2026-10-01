@@ -189,6 +189,50 @@ function pointInPolygon2D(lat, lon, points) {
   return inside
 }
 
+function segmentIntersectionLatLon(source, receiver, barrier) {
+  const p1 = [Number(source.lon), Number(source.lat)]
+  const p2 = [Number(receiver.lon), Number(receiver.lat)]
+  const q1 = [Number(barrier.lon_a), Number(barrier.lat_a)]
+  const q2 = [Number(barrier.lon_b), Number(barrier.lat_b)]
+  const rx = p2[0] - p1[0]
+  const ry = p2[1] - p1[1]
+  const sx = q2[0] - q1[0]
+  const sy = q2[1] - q1[1]
+  const cross = (ax, ay, bx, by) => ax * by - ay * bx
+  const den = cross(rx, ry, sx, sy)
+  if (Math.abs(den) < 1e-12) return null
+  const qpx = q1[0] - p1[0]
+  const qpy = q1[1] - p1[1]
+  const t = cross(qpx, qpy, sx, sy) / den
+  const u = cross(qpx, qpy, rx, ry) / den
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null
+  return {
+    t,
+    u,
+    lat: Number(source.lat) + t * (Number(receiver.lat) - Number(source.lat)),
+    lon: Number(source.lon) + t * (Number(receiver.lon) - Number(source.lon))
+  }
+}
+
+function barrierCrossingsForPair(source, receiver, barriers, totalHorizontal) {
+  return barriers
+    .filter(barrier => barrier.enabled)
+    .map(barrier => {
+      const hit = segmentIntersectionLatLon(source, receiver, barrier)
+      if (!hit) return null
+      const sourceToBarrier = totalHorizontal * hit.t
+      const barrierToReceiver = totalHorizontal * (1 - hit.t)
+      return {
+        barrier,
+        ...hit,
+        sourceToBarrier,
+        barrierToReceiver
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.t - b.t)
+}
+
 function distancePairsGeoJSON(pairs) {
   return {
     type: 'FeatureCollection',
@@ -807,7 +851,8 @@ function App() {
         source,
         receiver,
         horizontal,
-        distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical)
+        distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical),
+        barrierCrossings: barrierCrossingsForPair(source, receiver, barriers, horizontal)
       }]
     }
 
@@ -821,12 +866,13 @@ function App() {
           source,
           receiver,
           horizontal,
-          distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical)
+          distance3d: Math.sqrt(horizontal * horizontal + vertical * vertical),
+          barrierCrossings: barrierCrossingsForPair(source, receiver, barriers, horizontal)
         })
       })
     })
     return pairs
-  }, [distanceMode, distanceSourceId, distanceReceiverId, sources, receivers])
+  }, [distanceMode, distanceSourceId, distanceReceiverId, sources, receivers, barriers])
   const distanceData = useMemo(() => distancePairsGeoJSON(distancePairs), [distancePairs])
   const polygonData = useMemo(() => polygonGeoJSON(polygon), [polygon])
   const draftData = useMemo(() => polygonGeoJSON(draftPolygon), [draftPolygon])
@@ -3016,6 +3062,24 @@ function App() {
           </Marker>
         ))}
 
+        {distanceMode !== 'off' && distancePairs.slice(0, distanceMode === 'all' ? 40 : 1).flatMap(pair =>
+          (pair.barrierCrossings || []).slice(0, 3).map((crossing, index) => (
+            <Marker
+              key={`barrier-distance-${pair.id}-${crossing.barrier.id || index}`}
+              longitude={(Number(crossing.lon) + Number(pair.receiver.lon)) / 2}
+              latitude={(Number(crossing.lat) + Number(pair.receiver.lat)) / 2}
+              anchor="center"
+            >
+              <div className={`distance-fr-label barrier-distance-label ${distanceMode === 'all' ? 'compact' : ''}`}>
+                <strong>B–R {crossing.barrierToReceiver.toFixed(1)} m</strong>
+                {distanceMode === 'selected' && (
+                  <span>{crossing.barrier.name || 'Barrera'} → {pair.receiver.name}</span>
+                )}
+              </div>
+            </Marker>
+          ))
+        )}
+
         {cutStart && (
           <Marker longitude={cutStart[1]} latitude={cutStart[0]} anchor="center">
             <div className={`cut-endpoint ${cutModeType === 'pair' ? 'source' : ''}`}>{cutModeType === 'pair' ? 'F' : 'A'}</div>
@@ -3654,7 +3718,13 @@ function App() {
               <div className="distance-result-card">
                 <div><span>Distancia horizontal</span><strong>{distancePairs[0].horizontal.toFixed(2)} m</strong></div>
                 <div><span>Distancia geométrica 3D*</span><strong>{distancePairs[0].distance3d.toFixed(2)} m</strong></div>
-                <small>*Considera las alturas configuradas de F y R; la línea visible muestra la distancia horizontal en planta.</small>
+                {(distancePairs[0].barrierCrossings || []).map((crossing, index) => (
+                  <div className="distance-barrier-row" key={crossing.barrier.id || index}>
+                    <span>{crossing.barrier.name || `Barrera ${index + 1}`}</span>
+                    <strong>F–B {crossing.sourceToBarrier.toFixed(2)} m · B–R {crossing.barrierToReceiver.toFixed(2)} m</strong>
+                  </div>
+                ))}
+                <small>*Considera las alturas configuradas de F y R; F–B y B–R son distancias horizontales medidas hasta la intersección con la barrera.</small>
               </div>
               <button
                 type="button"
