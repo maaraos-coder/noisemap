@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Optional
 import math
 import numpy as np
 
@@ -56,6 +56,7 @@ class PropagationSettings:
     humidity_pct: float = 70.0
     ground_factor: float = 0.0
     reflections_enabled: bool = False
+    c0_db: float = 0.0
 
 
 def latlon_to_xy(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
@@ -83,6 +84,23 @@ def geometric_divergence_db(distance_m: float) -> float:
 
 def atmospheric_absorption_db(distance_m: float, alpha_db_per_km: float) -> float:
     return max(0.0, float(alpha_db_per_km)) * max(0.0, float(distance_m)) / 1000.0
+
+
+def meteorological_correction_db(
+    horizontal_distance_m: float,
+    source_height_m: float,
+    receiver_height_m: float,
+    c0_db: float,
+) -> float:
+    """Long-term meteorological correction Cmet."""
+    dp = max(float(horizontal_distance_m), 0.0)
+    hs = max(float(source_height_m), 0.0)
+    hr = max(float(receiver_height_m), 0.0)
+    c0 = max(float(c0_db), 0.0)
+    limit = 10.0 * (hs + hr)
+    if dp <= limit or dp <= 1e-9 or c0 <= 0.0:
+        return 0.0
+    return c0 * max(0.0, 1.0 - limit / dp)
 
 
 def ground_attenuation_db(
