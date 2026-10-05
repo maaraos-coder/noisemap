@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
@@ -928,6 +928,7 @@ function App() {
   const [barrierStart, setBarrierStart] = useState(null)
   const [barrierHover, setBarrierHover] = useState(null)
   const [lineStart, setLineStart] = useState(null)
+  const [lineHover, setLineHover] = useState(null)
   const [rayMode, setRayMode] = useState('off')
   const [distanceMode, setDistanceMode] = useState('off')
   const [distanceOpen, setDistanceOpen] = useState(false)
@@ -1038,6 +1039,20 @@ function App() {
       }]
     }
   }, [barrierStart, barrierHover])
+  const linePreviewData = useMemo(() => {
+    if (!lineStart || !lineHover) return { type: 'FeatureCollection', features: [] }
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: [[lineStart[1], lineStart[0]], [lineHover[1], lineHover[0]]]
+        }
+      }]
+    }
+  }, [lineStart, lineHover])
   const accessoryData = useMemo(() => accessoriesGeoJSON(accessories), [accessories])
   const contourData = useMemo(() => contoursGeoJSON(contours), [contours])
   const contourDraftData = useMemo(() => lineGeoJSON(contourDraft), [contourDraft])
@@ -1129,9 +1144,12 @@ function App() {
   }, [])
 
   const onMapMouseMove = event => {
+    const { lat, lng } = event.lngLat
     if (mode === 'barrier' && barrierStart) {
-      const { lat, lng } = event.lngLat
       setBarrierHover([lat, lng])
+    }
+    if (mode === 'line' && lineStart) {
+      setLineHover([lat, lng])
     }
   }
 
@@ -1312,10 +1330,11 @@ function App() {
     if (mode === 'line') {
       if (!lineStart) {
         setLineStart([lat, lng])
+        setLineHover([lat, lng])
       } else {
         const item = {
           id: crypto.randomUUID(),
-          name: `Auxiliar gráfico ${accessories.length + 1}`,
+          name: `Línea auxiliar ${accessories.length + 1}`,
           kind: 'measurement',
           lat_a: lineStart[0],
           lon_a: lineStart[1],
@@ -1324,7 +1343,9 @@ function App() {
           height_m: 0
         }
         setAccessories(prev => [...prev, item])
+        setSelected({ type: 'accessory', id: item.id })
         setLineStart(null)
+        setLineHover(null)
       }
       return
     }
@@ -1442,6 +1463,7 @@ function App() {
       setBarrierStart(null)
       setBarrierHover(null)
       setLineStart(null)
+      setLineHover(null)
       setProjectMessage(
         data.result
           ? 'Proyecto cargado con su último cálculo. Si modificas algo, vuelve a calcular el mapa.'
@@ -1800,6 +1822,7 @@ function App() {
     setBarrierStart(null)
     setBarrierHover(null)
     setLineStart(null)
+    setLineHover(null)
     if (mode === 'cut') {
       setCutStart(null)
       setCutEnd(null)
@@ -2014,6 +2037,7 @@ function App() {
     if (selected.type === 'barrier') return barriers.find(x => x.id === selected.id)
     if (selected.type === 'building') return buildings.find(x => x.id === selected.id)
     if (selected.type === 'road') return roads.find(x => x.id === selected.id)
+    if (selected.type === 'accessory') return accessories.find(x => x.id === selected.id)
     if (selected.type === 'contour') return contours.find(x => x.id === selected.id)
     return null
   })()
@@ -2785,6 +2809,8 @@ function App() {
       setBuildings(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'road') {
       setRoads(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    } else if (selected.type === 'accessory') {
+      setAccessories(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     }
@@ -2836,6 +2862,8 @@ function App() {
       setReceivers(prev => prev.filter(x => x.building_id !== selected.id))
     } else if (selected.type === 'road') {
       setRoads(prev => prev.filter(x => x.id !== selected.id))
+    } else if (selected.type === 'accessory') {
+      setAccessories(prev => prev.filter(x => x.id !== selected.id))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.filter(x => x.id !== selected.id))
     }
@@ -3216,6 +3244,54 @@ function App() {
           </Source>
         )}
 
+        {mode === 'line' && lineStart && lineHover && (
+          <Source id="line-preview" type="geojson" data={linePreviewData}>
+            <Layer
+              id="line-preview-layer"
+              type="line"
+              paint={{
+                'line-color': '#111827',
+                'line-width': 2.8,
+                'line-dasharray': [3, 2],
+                'line-opacity': 0.95
+              }}
+            />
+          </Source>
+        )}
+
+        {mode === 'line' && lineStart && (
+          <Marker
+            longitude={lineStart[1]}
+            latitude={lineStart[0]}
+            anchor="center"
+            onClick={e => e.originalEvent.stopPropagation()}
+          >
+            <div className="aux-line-draft-handle start" title="Primer extremo" />
+          </Marker>
+        )}
+
+        {mode === 'line' && lineStart && lineHover && (
+          <Marker
+            longitude={lineHover[1]}
+            latitude={lineHover[0]}
+            anchor="center"
+          >
+            <div className="aux-line-draft-handle end" title="Segundo extremo" />
+          </Marker>
+        )}
+
+        {mode === 'line' && lineStart && lineHover && (
+          <Marker
+            longitude={lineHover[1]}
+            latitude={lineHover[0]}
+            anchor="bottom-left"
+          >
+            <div className="aux-line-live-measure">
+              {haversineMeters(lineStart[0], lineStart[1], lineHover[0], lineHover[1]).toFixed(1)} m
+            </div>
+          </Marker>
+        )}
+
         {layers.accessories && (
           <Source id="accessories" type="geojson" data={accessoryData}>
             <Layer
@@ -3229,6 +3305,70 @@ function App() {
             />
           </Source>
         )}
+
+        {layers.accessories && accessories.map(line => {
+          const length = haversineMeters(line.lat_a, line.lon_a, line.lat_b, line.lon_b)
+          const midLat = (Number(line.lat_a) + Number(line.lat_b)) / 2
+          const midLon = (Number(line.lon_a) + Number(line.lon_b)) / 2
+          const isSelected = selected?.type === 'accessory' && selected.id === line.id
+          return (
+            <Fragment key={line.id}>
+              <Marker
+                longitude={midLon}
+                latitude={midLat}
+                anchor="center"
+                onClick={e => {
+                  e.originalEvent.stopPropagation()
+                  setSelected({ type: 'accessory', id: line.id })
+                }}
+              >
+                <div className={`aux-line-distance-label ${isSelected ? 'selected' : ''}`}>
+                  {length.toFixed(1)} m
+                </div>
+              </Marker>
+
+              <Marker
+                longitude={line.lon_a}
+                latitude={line.lat_a}
+                anchor="center"
+                draggable
+                onDragStart={() => setSelected({ type: 'accessory', id: line.id })}
+                onDragEnd={e => {
+                  const { lat, lng } = e.lngLat
+                  setAccessories(prev => prev.map(item =>
+                    item.id === line.id ? { ...item, lat_a: lat, lon_a: lng } : item
+                  ))
+                }}
+                onClick={e => {
+                  e.originalEvent.stopPropagation()
+                  setSelected({ type: 'accessory', id: line.id })
+                }}
+              >
+                <div className={`aux-line-handle ${isSelected ? 'selected' : ''}`} title="Extremo A · arrastra para ajustar" />
+              </Marker>
+
+              <Marker
+                longitude={line.lon_b}
+                latitude={line.lat_b}
+                anchor="center"
+                draggable
+                onDragStart={() => setSelected({ type: 'accessory', id: line.id })}
+                onDragEnd={e => {
+                  const { lat, lng } = e.lngLat
+                  setAccessories(prev => prev.map(item =>
+                    item.id === line.id ? { ...item, lat_b: lat, lon_b: lng } : item
+                  ))
+                }}
+                onClick={e => {
+                  e.originalEvent.stopPropagation()
+                  setSelected({ type: 'accessory', id: line.id })
+                }}
+              >
+                <div className={`aux-line-handle ${isSelected ? 'selected' : ''}`} title="Extremo B · arrastra para ajustar" />
+              </Marker>
+            </Fragment>
+          )
+        })}
 
         {layers.rays && rayMode !== 'off' && (
           <Source id="source-receiver-rays" type="geojson" data={rayData}>
@@ -3608,7 +3748,11 @@ function App() {
             setRoadDraft([])
             setMode('road')
           }} />
-          <IconButton active={mode === 'line'} title="Auxiliar gráfico: solo dibujo, no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => setMode('line')} />
+          <IconButton active={mode === 'line'} title="Línea auxiliar con medición en vivo; no participa en el cálculo acústico" icon="⌇" label="Auxiliar" onClick={() => {
+            setLineStart(null)
+            setLineHover(null)
+            setMode('line')
+          }} />
           <IconButton active={mode === 'contour'} title="Dibujar curva de nivel y asignar cota" icon="≋" label="Curva nivel" onClick={() => {
             setContourDraft([])
             setMode('contour')
@@ -5816,8 +5960,12 @@ function App() {
         </div>
       )}
 
-      {mode === 'line' && lineStart && (
-        <div className="status-pill">Auxiliar gráfico · selecciona el segundo extremo · no afecta el cálculo acústico</div>
+      {mode === 'line' && (
+        <div className="status-pill">
+          {lineStart
+            ? `Línea auxiliar · ${lineHover ? haversineMeters(lineStart[0], lineStart[1], lineHover[0], lineHover[1]).toFixed(1) : '0.0'} m · clic para fijar el segundo extremo`
+            : 'Línea auxiliar · clic para fijar el primer extremo'}
+        </div>
       )}
 
       {mode === 'contour' && (
