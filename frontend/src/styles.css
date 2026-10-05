@@ -4567,3 +4567,74 @@ select {
   padding-top: 5px;
   border-top: 1px dashed #d7dee5;
 }
+
+
+/* Auxiliary measurement line */
+.aux-line-draft-handle,
+.aux-line-handle {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: #111827;
+  box-shadow: 0 0 0 2px rgba(17,24,39,.28), 0 2px 7px rgba(0,0,0,.28);
+}
+
+.aux-line-draft-handle.start {
+  width: 18px;
+  height: 18px;
+  background: #2f8a51;
+  box-shadow: 0 0 0 3px rgba(47,138,81,.25), 0 3px 10px rgba(0,0,0,.30);
+}
+
+.aux-line-draft-handle.end {
+  background: #111827;
+  pointer-events: none;
+}
+
+.aux-line-handle {
+  width: 13px;
+  height: 13px;
+  cursor: grab;
+  opacity: .82;
+  transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
+}
+
+.aux-line-handle:hover,
+.aux-line-handle.selected {
+  transform: scale(1.18);
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(17,24,39,.22), 0 3px 10px rgba(0,0,0,.32);
+}
+
+.aux-line-live-measure {
+  transform: translate(10px, -10px);
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(17,24,39,.94);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,.22);
+  pointer-events: none;
+}
+
+.aux-line-distance-label {
+  padding: 3px 7px;
+  border: 1px solid rgba(17,24,39,.32);
+  border-radius: 999px;
+  background: rgba(255,255,255,.95);
+  color: #111827;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 2px 7px rgba(0,0,0,.13);
+  cursor: pointer;
+}
+
+.aux-line-distance-label.selected {
+  border-color: #111827;
+  box-shadow: 0 0 0 2px rgba(17,24,39,.14), 0 3px 9px rgba(0,0,0,.16);
+}
