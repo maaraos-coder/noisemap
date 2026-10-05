@@ -921,6 +921,12 @@ const COURSE3_STAGE8_PRESETS = {
       { id:'VI-02', name:'VI-02 · Vibrador de inmersión', x:29, y:23, height_m:15.0 },
       { id:'GT-01', name:'GT-01 · Grúa torre', x:34, y:26, height_m:24.0 }
     ]
+  },
+  'c3l1-s10': {
+    title: 'Etapa 10 · Caso integrador final',
+    width_m: 70,
+    height_m: 55,
+    sources: []
   }
 }
 
@@ -983,7 +989,9 @@ function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
 
   // El predio didáctico se representa con líneas auxiliares, NO como área de cálculo.
   // Así el alumno debe aprender a dibujar posteriormente su propia área de cálculo.
-  const boundaryXY = [[0,0],[50,0],[50,40],[0,40]]
+  const widthM = Number(preset.width_m || 50)
+  const heightM = Number(preset.height_m || 40)
+  const boundaryXY = [[0,0],[widthM,0],[widthM,heightM],[0,heightM]]
   const boundaryPoints = boundaryXY.map(([x,y]) => coursePresetLocalToLatLon(x,y,originLat,originLon))
   const accessories = boundaryPoints.map((point, index) => {
     const next = boundaryPoints[(index + 1) % boundaryPoints.length]
@@ -1007,7 +1015,7 @@ function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
     accessories,
     polygon: [],
     boundaryPoints,
-    center: coursePresetLocalToLatLon(25,20,originLat,originLon)
+    center: coursePresetLocalToLatLon(widthM/2,heightM/2,originLat,originLon)
   }
 }
 
@@ -2138,8 +2146,11 @@ function App() {
       // El geocodificador entrega un punto de referencia dentro del Parque
       // Bicentenario de Cerrillos. El rectángulo didáctico 50 × 40 m se centra
       // en ese punto para mantenerlo dentro de un paño amplio y evitar calles.
+      const presetConfig = COURSE3_STAGE8_PRESETS[scenarioKey]
+      const halfWidth = Number(presetConfig?.width_m || 50) / 2
+      const halfHeight = Number(presetConfig?.height_m || 40) / 2
       const [originLat, originLon] = coursePresetLocalToLatLon(
-        -25, -20, Number(origin.lat), Number(origin.lon)
+        -halfWidth, -halfHeight, Number(origin.lat), Number(origin.lon)
       )
       const preset = buildCourseStage8Preset(scenarioKey, originLat, originLon)
       if (!preset) return
@@ -2170,7 +2181,9 @@ function App() {
         c0_db: 0
       }))
       setLocationMessage(
-        preset.title + ' cargado. El predio está demarcado con líneas auxiliares y las fuentes ya tienen posición y altura. Ingresa los LwA, agrega tus receptores y después dibuja tú mismo el área de cálculo.'
+        scenarioKey === 'c3l1-s10'
+          ? preset.title + ' cargado. Solo se entrega la demarcación del predio. Debes crear fuentes, receptores y área de cálculo según tu estrategia de modelación.'
+          : preset.title + ' cargado. El predio está demarcado con líneas auxiliares y las fuentes ya tienen posición y altura. Ingresa los LwA, agrega tus receptores y después dibuja tú mismo el área de cálculo.'
       )
 
       window.setTimeout(() => {
