@@ -793,6 +793,12 @@ function sourceEquivalentLevel(source, aWeighting) {
 
 
 function sourceMarkerLabel(source, aWeighting) {
+  if (source.course_power_pending || source.lw_db == null || source.lw_db === '') {
+    return {
+      main: 'Lw pendiente',
+      sub: 'Ingresa potencia'
+    }
+  }
   if (source.spectrum_mode === 'single') {
     return {
       main: `${Number(source.lw_db).toFixed(1)} dB`,
@@ -895,25 +901,25 @@ const COURSE3_STAGE8_PRESETS = {
   'c3l1-s8-a': {
     title: 'Etapa 8 · A · Excavación y movimiento de tierras',
     sources: [
-      { id:'EX-01', name:'EX-01 · Excavadora hidráulica', x:12, y:21, height_m:1.5, lw_db:105, bands:{63:123,125:112,250:107,500:101,1000:98,2000:96,4000:92,8000:85} },
-      { id:'CF-01', name:'CF-01 · Cargador frontal', x:28, y:19, height_m:1.5, lw_db:108, bands:{63:113,125:111,250:104,500:103,1000:103,2000:100,4000:100,8000:89} },
-      { id:'CT-01', name:'CT-01 · Camión tolva articulado', x:41, y:10, height_m:1.5, lw_db:102, bands:{63:108,125:104,250:101,500:98,1000:97,2000:94,4000:91,8000:86} }
+      { id:'EX-01', name:'EX-01 · Excavadora hidráulica', x:12, y:21, height_m:1.5 },
+      { id:'CF-01', name:'CF-01 · Cargador frontal', x:28, y:19, height_m:1.5 },
+      { id:'CT-01', name:'CT-01 · Camión tolva articulado', x:41, y:10, height_m:1.5 }
     ]
   },
   'c3l1-s8-b': {
     title: 'Etapa 8 · B · Obra gruesa a nivel de piso',
     sources: [
-      { id:'MX-01', name:'MX-01 · Camión mixer', x:9, y:11, height_m:1.5, lw_db:108, bands:{63:111,125:102,250:94,500:97,1000:98,2000:106,4000:88,8000:83} },
-      { id:'BH-01', name:'BH-01 · Bomba de hormigón', x:21, y:17, height_m:1.5, lw_db:108, bands:{63:111,125:105,250:103,500:103,1000:102,2000:103,4000:95,8000:91} },
-      { id:'VI-01', name:'VI-01 · Vibrador de inmersión', x:31, y:23, height_m:1.0, lw_db:106, bands:{63:110,125:108,250:108,500:101,1000:97,2000:100,4000:98,8000:93} }
+      { id:'MX-01', name:'MX-01 · Camión mixer', x:9, y:11, height_m:1.5 },
+      { id:'BH-01', name:'BH-01 · Bomba de hormigón', x:21, y:17, height_m:1.5 },
+      { id:'VI-01', name:'VI-01 · Vibrador de inmersión', x:31, y:23, height_m:1.0 }
     ]
   },
   'c3l1-s8-c': {
     title: 'Etapa 8 · C · Obra gruesa en altura',
     sources: [
-      { id:'BM-01', name:'BM-01 · Bomba + mixer a 5° piso', x:10, y:12, height_m:1.5, lw_db:110, bands:{63:111,125:109,250:106,500:107,1000:105,2000:102,4000:99,8000:94} },
-      { id:'VI-02', name:'VI-02 · Vibrador de inmersión', x:29, y:23, height_m:15.0, lw_db:106, bands:{63:110,125:108,250:108,500:101,1000:97,2000:100,4000:98,8000:93} },
-      { id:'GT-01', name:'GT-01 · Grúa torre', x:34, y:26, height_m:24.0, lw_db:104, bands:{63:110,125:105,250:108,500:104,1000:94,2000:94,4000:84,8000:78} }
+      { id:'BM-01', name:'BM-01 · Bomba + mixer a 5° piso', x:10, y:12, height_m:1.5 },
+      { id:'VI-02', name:'VI-02 · Vibrador de inmersión', x:29, y:23, height_m:15.0 },
+      { id:'GT-01', name:'GT-01 · Grúa torre', x:34, y:26, height_m:24.0 }
     ]
   }
 }
@@ -938,12 +944,13 @@ function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
       lat,
       lon,
       height_m: item.height_m,
-      lw_db: item.lw_db,
+      lw_db: null,
       dc_db: 0,
       enabled: true,
-      spectrum_mode: 'octaves',
+      spectrum_mode: 'broadband',
       single_frequency_hz: 500,
-      octave_levels: { ...item.bands },
+      octave_levels: {},
+      course_power_pending: true,
       adjust_db: 0,
       time_active_pct: 100,
       noise_control_type: 'none',
@@ -1599,6 +1606,18 @@ function App() {
   const calculate = async () => {
     if (!sources.some(s => s.enabled)) return
 
+    const pendingCourseSources = sources.filter(
+      s => s.enabled && (s.course_power_pending || s.lw_db == null || s.lw_db === '')
+    )
+    if (pendingCourseSources.length) {
+      alert(
+        'Antes de calcular, ingresa el LwA de: ' +
+        pendingCourseSources.map(s => s.name).join(', ') +
+        '. Estos valores deben provenir de tu conversión de la Etapa 8.'
+      )
+      return
+    }
+
     const cleanPolygon = polygon
       .map(point => [Number(point?.[0]), Number(point?.[1])])
       .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
@@ -2133,7 +2152,7 @@ function App() {
         c0_db: 0
       }))
       setLocationMessage(
-        preset.title + ' cargado. El predio y las fuentes quedaron posicionados automáticamente. Ahora selecciona y agrega tus propios receptores.'
+        preset.title + ' cargado. El predio, las posiciones y las alturas quedaron preparados. Ingresa tú el LwA calculado de cada fuente y luego agrega tus receptores.'
       )
 
       window.setTimeout(() => {
@@ -5056,11 +5075,21 @@ function App() {
 
               <h4 className="subheading">Niveles de potencia sonora</h4>
 
+              {selectedObject.course_power_pending && (
+                <div className="engine-note">
+                  Etapa 8 · La posición y altura ya están definidas. Ingresa aquí el LwA que calculaste en el ejercicio antes de modelar.
+                </div>
+              )}
+
               {selectedObject.spectrum_mode === 'broadband' && (
                 <div className="inline-field">
                   <span>LwA</span>
-                  <input type="number" value={selectedObject.lw_db}
-                    onChange={e => patchSelected({ lw_db:Number(e.target.value) })} />
+                  <input type="number" value={selectedObject.lw_db ?? ''}
+                    placeholder="Ingresa LwA"
+                    onChange={e => patchSelected({
+                      lw_db: e.target.value === '' ? null : Number(e.target.value),
+                      course_power_pending: e.target.value === ''
+                    })} />
                   <b>dB(A)</b>
                 </div>
               )}
