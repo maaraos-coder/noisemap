@@ -981,14 +981,32 @@ function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
 
   const commonReceivers = []
 
-  const polygonXY = [[0,0],[50,0],[50,40],[0,40]]
-  const area = polygonXY.map(([x,y]) => coursePresetLocalToLatLon(x,y,originLat,originLon))
+  // El predio didáctico se representa con líneas auxiliares, NO como área de cálculo.
+  // Así el alumno debe aprender a dibujar posteriormente su propia área de cálculo.
+  const boundaryXY = [[0,0],[50,0],[50,40],[0,40]]
+  const boundaryPoints = boundaryXY.map(([x,y]) => coursePresetLocalToLatLon(x,y,originLat,originLon))
+  const accessories = boundaryPoints.map((point, index) => {
+    const next = boundaryPoints[(index + 1) % boundaryPoints.length]
+    return {
+      id: `course-boundary-${index + 1}`,
+      name: `Límite predio ${index + 1}`,
+      kind: 'measurement',
+      lat_a: point[0],
+      lon_a: point[1],
+      lat_b: next[0],
+      lon_b: next[1],
+      height_m: 0,
+      course_boundary: true
+    }
+  })
 
   return {
     title: preset.title,
     sources: sourceItems,
     receivers: commonReceivers,
-    polygon: area,
+    accessories,
+    polygon: [],
+    boundaryPoints,
     center: coursePresetLocalToLatLon(25,20,originLat,originLon)
   }
 }
@@ -2131,9 +2149,9 @@ function App() {
       setBarriers([])
       setBuildings([])
       setRoads([])
-      setAccessories([])
+      setAccessories(preset.accessories || [])
       setContours([])
-      setPolygon(preset.polygon)
+      setPolygon([])
       setResult(null)
       setSelected(null)
       setMode('navigate')
@@ -2152,12 +2170,12 @@ function App() {
         c0_db: 0
       }))
       setLocationMessage(
-        preset.title + ' cargado. El predio, las posiciones y las alturas quedaron preparados. Ingresa tú el LwA calculado de cada fuente y luego agrega tus receptores.'
+        preset.title + ' cargado. El predio está demarcado con líneas auxiliares y las fuentes ya tienen posición y altura. Ingresa los LwA, agrega tus receptores y después dibuja tú mismo el área de cálculo.'
       )
 
       window.setTimeout(() => {
         if (!mapRef.current) return
-        const allPoints = [...preset.polygon]
+        const allPoints = [...(preset.boundaryPoints || [])]
         const lats = allPoints.map(p => Number(p[0]))
         const lons = allPoints.map(p => Number(p[1]))
         mapRef.current.fitBounds(
