@@ -2109,7 +2109,13 @@ function App() {
         return
       }
 
-      const preset = buildCourseStage8Preset(scenarioKey, Number(origin.lat), Number(origin.lon))
+      // El geocodificador entrega un punto de referencia del proyecto. Para que
+      // el rectángulo didáctico 50 × 40 m quede centrado en ese punto, se
+      // desplaza 25 m al oeste y 20 m al sur para definir el origen local (0,0).
+      const [originLat, originLon] = coursePresetLocalToLatLon(
+        -25, -20, Number(origin.lat), Number(origin.lon)
+      )
+      const preset = buildCourseStage8Preset(scenarioKey, originLat, originLon)
       if (!preset) return
 
       setSources(preset.sources)
