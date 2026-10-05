@@ -890,6 +890,113 @@ function draftProfileCoordinates(draft) {
   }
 }
 
+
+const COURSE3_STAGE8_PRESETS = {
+  'c3l1-s8-a': {
+    title: 'Etapa 8 · A · Excavación y movimiento de tierras',
+    sources: [
+      { id:'EX-01', name:'EX-01 · Excavadora hidráulica', x:12, y:21, height_m:1.5, lw_db:105, bands:{63:123,125:112,250:107,500:101,1000:98,2000:96,4000:92,8000:85} },
+      { id:'CF-01', name:'CF-01 · Cargador frontal', x:28, y:19, height_m:1.5, lw_db:108, bands:{63:113,125:111,250:104,500:103,1000:103,2000:100,4000:100,8000:89} },
+      { id:'CT-01', name:'CT-01 · Camión tolva articulado', x:41, y:10, height_m:1.5, lw_db:102, bands:{63:108,125:104,250:101,500:98,1000:97,2000:94,4000:91,8000:86} }
+    ]
+  },
+  'c3l1-s8-b': {
+    title: 'Etapa 8 · B · Obra gruesa a nivel de piso',
+    sources: [
+      { id:'MX-01', name:'MX-01 · Camión mixer', x:9, y:11, height_m:1.5, lw_db:108, bands:{63:111,125:102,250:94,500:97,1000:98,2000:106,4000:88,8000:83} },
+      { id:'BH-01', name:'BH-01 · Bomba de hormigón', x:21, y:17, height_m:1.5, lw_db:108, bands:{63:111,125:105,250:103,500:103,1000:102,2000:103,4000:95,8000:91} },
+      { id:'VI-01', name:'VI-01 · Vibrador de inmersión', x:31, y:23, height_m:1.0, lw_db:106, bands:{63:110,125:108,250:108,500:101,1000:97,2000:100,4000:98,8000:93} }
+    ]
+  },
+  'c3l1-s8-c': {
+    title: 'Etapa 8 · C · Obra gruesa en altura',
+    sources: [
+      { id:'BM-01', name:'BM-01 · Bomba + mixer a 5° piso', x:10, y:12, height_m:1.5, lw_db:110, bands:{63:111,125:109,250:106,500:107,1000:105,2000:102,4000:99,8000:94} },
+      { id:'VI-02', name:'VI-02 · Vibrador de inmersión', x:29, y:23, height_m:15.0, lw_db:106, bands:{63:110,125:108,250:108,500:101,1000:97,2000:100,4000:98,8000:93} },
+      { id:'GT-01', name:'GT-01 · Grúa torre', x:34, y:26, height_m:24.0, lw_db:104, bands:{63:110,125:105,250:108,500:104,1000:94,2000:94,4000:84,8000:78} }
+    ]
+  }
+}
+
+function coursePresetLocalToLatLon(x, y, lat0, lon0) {
+  const radius = 6371000
+  const lat = Number(lat0) + (Number(y) / radius) * 180 / Math.PI
+  const latMid = ((lat + Number(lat0)) / 2) * Math.PI / 180
+  const lon = Number(lon0) + (Number(x) / (radius * Math.max(Math.cos(latMid), 1e-9))) * 180 / Math.PI
+  return [lat, lon]
+}
+
+function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
+  const preset = COURSE3_STAGE8_PRESETS[scenarioKey]
+  if (!preset) return null
+
+  const sourceItems = preset.sources.map(item => {
+    const [lat, lon] = coursePresetLocalToLatLon(item.x, item.y, originLat, originLon)
+    return {
+      id: item.id,
+      name: item.name,
+      lat,
+      lon,
+      height_m: item.height_m,
+      lw_db: item.lw_db,
+      dc_db: 0,
+      enabled: true,
+      spectrum_mode: 'octaves',
+      single_frequency_hz: 500,
+      octave_levels: { ...item.bands },
+      adjust_db: 0,
+      time_active_pct: 100,
+      noise_control_type: 'none',
+      control_global_db: 0,
+      control_direct_db: 0,
+      control_reduction_db: { ...DEFAULT_CONTROL_BANDS },
+      silencer_il_db: { ...DEFAULT_SILENCER_IL },
+      enclosure_tl_db: { ...DEFAULT_ENCLOSURE_TL },
+      enclosure_leak_pct: 0,
+      enclosure_vent_pct: 10,
+      enclosure_length_m: 2,
+      enclosure_width_m: 2,
+      enclosure_height_m: 2.5,
+      enclosure_azimuth_deg: 0,
+      enclosure_rw_db: 30,
+      enclosure_faces: defaultEnclosureFaces(),
+      enclosure_lining_mode: 'unlined',
+      enclosure_absorption_coeff: { ...ENCLOSURE_ABSORPTION_PRESETS.unlined },
+      enclosure_vent_area_m2: 0.10,
+      enclosure_vent_face: 'back',
+      semi_opening_pct: 25,
+      semi_opening_azimuth_deg: 0,
+      semi_opening_angle_deg: 90,
+      course_local_x_m: item.x,
+      course_local_y_m: item.y
+    }
+  })
+
+  const commonReceivers = [
+    { id:'R1', name:'R1 · Fachada próxima', x:25, y:47, height_m:1.5 },
+    { id:'R2', name:'R2 · Edificio vecino intermedio', x:56, y:26, height_m:7.5 },
+    { id:'R3', name:'R3 · Edificio vecino superior', x:18, y:-10, height_m:15.0 }
+  ].map(item => {
+    const [lat, lon] = coursePresetLocalToLatLon(item.x, item.y, originLat, originLon)
+    return {
+      id:item.id, name:item.name, lat, lon,
+      height_m:item.height_m, visible:true, height_mode:'specify',
+      course_local_x_m:item.x, course_local_y_m:item.y
+    }
+  })
+
+  const polygonXY = [[0,0],[50,0],[50,40],[0,40]]
+  const area = polygonXY.map(([x,y]) => coursePresetLocalToLatLon(x,y,originLat,originLon))
+
+  return {
+    title: preset.title,
+    sources: sourceItems,
+    receivers: commonReceivers,
+    polygon: area,
+    center: coursePresetLocalToLatLon(25,20,originLat,originLon)
+  }
+}
+
 function IconButton({ active, title, icon, label, onClick }) {
   return (
     <button
@@ -906,6 +1013,7 @@ function IconButton({ active, title, icon, label, onClick }) {
 
 function App() {
   const mapRef = useRef(null)
+  const coursePresetLoadedRef = useRef(false)
   const projectFileInputRef = useRef(null)
   const cutCanvasRef = useRef(null)
   const objectCardRef = useRef(null)
@@ -1974,6 +2082,86 @@ function App() {
     }
     return []
   }
+
+
+  useEffect(() => {
+    if (coursePresetLoadedRef.current) return
+
+    const params = new URLSearchParams(window.location.search)
+    const scenarioKey = params.get('scenario')
+    if (!COURSE3_STAGE8_PRESETS[scenarioKey]) return
+
+    coursePresetLoadedRef.current = true
+    let cancelled = false
+
+    const loadCoursePreset = async () => {
+      setLocationMessage('Cargando escenario didáctico de la Etapa 8…')
+      setSearchText('Maimónides 551, Santiago, Chile')
+
+      const results = await searchLocationDirectly('Maimónides 551, Santiago, Chile')
+      if (cancelled) return
+
+      const origin = results[0]
+      if (!origin) {
+        setLocationMessage(
+          'No fue posible ubicar automáticamente Maimónides 551. Usa Buscar y luego vuelve a abrir el escenario.'
+        )
+        return
+      }
+
+      const preset = buildCourseStage8Preset(scenarioKey, Number(origin.lat), Number(origin.lon))
+      if (!preset) return
+
+      setSources(preset.sources)
+      setReceivers(preset.receivers)
+      setBarriers([])
+      setBuildings([])
+      setRoads([])
+      setAccessories([])
+      setContours([])
+      setPolygon(preset.polygon)
+      setResult(null)
+      setSelected(null)
+      setMode('navigate')
+      setDraftPolygon([])
+      setSearchOpen(false)
+      setPanelOpen(false)
+      setResultsOpen(false)
+      setProjectOpen(false)
+      setDirty(true)
+      setGlobalSettings(prev => ({
+        ...prev,
+        a_weighting: true,
+        ground_factor: 0,
+        temperature_c: 15,
+        humidity_pct: 70,
+        c0_db: 0
+      }))
+      setLocationMessage(
+        preset.title + ' cargado. X/Y de la guía se transformaron automáticamente desde el origen local (0,0).'
+      )
+
+      window.setTimeout(() => {
+        if (!mapRef.current) return
+        const allPoints = [...preset.polygon, ...preset.receivers.map(r => [r.lat, r.lon])]
+        const lats = allPoints.map(p => Number(p[0]))
+        const lons = allPoints.map(p => Number(p[1]))
+        mapRef.current.fitBounds(
+          [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+          { padding: 90, duration: 900, maxZoom: 19 }
+        )
+      }, 350)
+    }
+
+    loadCoursePreset().catch(error => {
+      console.error('Preset Etapa 8:', error)
+      if (!cancelled) {
+        setLocationMessage('No fue posible cargar automáticamente el escenario didáctico.')
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [])
 
   const runSearch = async () => {
     const q = searchText.trim()
