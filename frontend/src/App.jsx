@@ -972,18 +972,7 @@ function buildCourseStage8Preset(scenarioKey, originLat, originLon) {
     }
   })
 
-  const commonReceivers = [
-    { id:'R1', name:'R1 · Fachada próxima', x:25, y:47, height_m:1.5 },
-    { id:'R2', name:'R2 · Edificio vecino intermedio', x:56, y:26, height_m:7.5 },
-    { id:'R3', name:'R3 · Edificio vecino superior', x:18, y:-10, height_m:15.0 }
-  ].map(item => {
-    const [lat, lon] = coursePresetLocalToLatLon(item.x, item.y, originLat, originLon)
-    return {
-      id:item.id, name:item.name, lat, lon,
-      height_m:item.height_m, visible:true, height_mode:'specify',
-      course_local_x_m:item.x, course_local_y_m:item.y
-    }
-  })
+  const commonReceivers = []
 
   const polygonXY = [[0,0],[50,0],[50,40],[0,40]]
   const area = polygonXY.map(([x,y]) => coursePresetLocalToLatLon(x,y,originLat,originLon))
@@ -2096,22 +2085,22 @@ function App() {
 
     const loadCoursePreset = async () => {
       setLocationMessage('Cargando escenario didáctico de la Etapa 8…')
-      setSearchText('Maimónides 551, Santiago, Chile')
+      setSearchText('Parque Bicentenario de Cerrillos, Santiago, Chile')
 
-      const results = await searchLocationDirectly('Maimónides 551, Santiago, Chile')
+      const results = await searchLocationDirectly('Parque Bicentenario de Cerrillos, Santiago, Chile')
       if (cancelled) return
 
       const origin = results[0]
       if (!origin) {
         setLocationMessage(
-          'No fue posible ubicar automáticamente Maimónides 551. Usa Buscar y luego vuelve a abrir el escenario.'
+          'No fue posible ubicar automáticamente Parque Bicentenario de Cerrillos. Usa Buscar y luego vuelve a abrir el escenario.'
         )
         return
       }
 
-      // El geocodificador entrega un punto de referencia del proyecto. Para que
-      // el rectángulo didáctico 50 × 40 m quede centrado en ese punto, se
-      // desplaza 25 m al oeste y 20 m al sur para definir el origen local (0,0).
+      // El geocodificador entrega un punto de referencia dentro del Parque
+      // Bicentenario de Cerrillos. El rectángulo didáctico 50 × 40 m se centra
+      // en ese punto para mantenerlo dentro de un paño amplio y evitar calles.
       const [originLat, originLon] = coursePresetLocalToLatLon(
         -25, -20, Number(origin.lat), Number(origin.lon)
       )
@@ -2144,12 +2133,12 @@ function App() {
         c0_db: 0
       }))
       setLocationMessage(
-        preset.title + ' cargado. X/Y de la guía se transformaron automáticamente desde el origen local (0,0).'
+        preset.title + ' cargado. El predio y las fuentes quedaron posicionados automáticamente. Ahora selecciona y agrega tus propios receptores.'
       )
 
       window.setTimeout(() => {
         if (!mapRef.current) return
-        const allPoints = [...preset.polygon, ...preset.receivers.map(r => [r.lat, r.lon])]
+        const allPoints = [...preset.polygon]
         const lats = allPoints.map(p => Number(p[0]))
         const lons = allPoints.map(p => Number(p[1]))
         mapRef.current.fitBounds(
