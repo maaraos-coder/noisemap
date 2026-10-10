@@ -1629,10 +1629,15 @@ function App() {
     }
   }
 
-  const calculate = async () => {
-    if (!sources.some(s => s.enabled)) return
+  const calculate = async (scenarioOverride = null) => {
+    const hasScenarioOverride = Boolean(scenarioOverride?.__profileScenario)
+    const calcSources = hasScenarioOverride ? scenarioOverride.sources : sources
+    const calcReceivers = hasScenarioOverride ? scenarioOverride.receivers : receivers
+    const calcBarriers = hasScenarioOverride ? scenarioOverride.barriers : barriers
 
-    const pendingCourseSources = sources.filter(
+    if (!calcSources.some(s => s.enabled)) return
+
+    const pendingCourseSources = calcSources.filter(
       s => s.enabled && (s.course_power_pending || s.lw_db == null || s.lw_db === '')
     )
     if (pendingCourseSources.length) {
@@ -1665,9 +1670,9 @@ function App() {
     setCalculationStatus('Preparando cálculo…')
 
     const payload = {
-      sources,
-      receivers,
-      barriers,
+      sources: calcSources,
+      receivers: calcReceivers,
+      barriers: calcBarriers,
       buildings,
       roads,
       contours,
@@ -2331,6 +2336,7 @@ function App() {
               ground_factor: globalSettings.ground_factor,
               temperature_c: globalSettings.temperature_c,
               humidity_pct: globalSettings.humidity_pct,
+              c0_db: globalSettings.c0_db,
               max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
               reflections_enabled: globalSettings.reflection_order !== 'none'
             }
@@ -2421,12 +2427,14 @@ function App() {
     setBarrierProfileOpen(true)
   }
 
-  const saveProfileChangesToMap = () => {
+  const saveProfileChangesToMap = async () => {
     if (!profileDraft || selected?.type !== 'barrier') return
     const coords = draftProfileCoordinates(profileDraft)
     if (!coords) return
 
-    setSources(prev => prev.map(item =>
+    const selectedBarrierId = selected.id
+
+    const nextSources = sources.map(item =>
       item.id === profileSourceId
         ? {
             ...item,
@@ -2435,9 +2443,9 @@ function App() {
             height_m: Number(profileDraft.source_height_m)
           }
         : item
-    ))
+    )
 
-    setReceivers(prev => prev.map(item =>
+    const nextReceivers = receivers.map(item =>
       item.id === profileReceiverId
         ? {
             ...item,
@@ -2447,17 +2455,31 @@ function App() {
             height_mode: 'specify'
           }
         : item
-    ))
+    )
 
-    setBarriers(prev => prev.map(item =>
-      item.id === selected.id
+    const nextBarriers = barriers.map(item =>
+      item.id === selectedBarrierId
         ? { ...item, height_m: Number(profileDraft.barrier_height_m) }
         : item
-    ))
+    )
 
+    // Commit exactly the same geometry that was previewed in the profile.
+    setSources(nextSources)
+    setReceivers(nextReceivers)
+    setBarriers(nextBarriers)
     setDirty(true)
     setBarrierProfileOpen(false)
     setProfileDraft(null)
+
+    // Recalculate with the newly committed objects immediately. Passing the
+    // explicit scenario avoids React's asynchronous state update from causing
+    // the old source/receiver/barrier geometry to be sent to the API.
+    await calculate({
+      __profileScenario: true,
+      sources: nextSources,
+      receivers: nextReceivers,
+      barriers: nextBarriers
+    })
   }
 
   useEffect(() => {
@@ -2496,6 +2518,7 @@ function App() {
               ground_factor: globalSettings.ground_factor,
               temperature_c: globalSettings.temperature_c,
               humidity_pct: globalSettings.humidity_pct,
+              c0_db: globalSettings.c0_db,
               max_barrier_db: globalSettings.barrier_limit ? 20 : 80,
               reflections_enabled: globalSettings.reflection_order !== 'none'
             }
@@ -6180,8 +6203,9 @@ function App() {
                   type="button"
                   className="profile-save-map-button"
                   onClick={saveProfileChangesToMap}
+                  disabled={calculating}
                 >
-                  Actualizar cambios en el mapa
+                  {calculating ? 'Actualizando mapa…' : 'Actualizar cambios en el mapa'}
                 </button>
               </>
             )
