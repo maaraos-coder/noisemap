@@ -2735,22 +2735,20 @@ def calculate(payload: CalculationRequest):
         for row_index, lat in enumerate(reversed(refined_lats)):
             refined_row: list[Optional[float]] = []
             base_row_f = row_index * (n - 1) / max(refined_n - 1, 1)
+            base_row_index = row_index // 2
+            row_is_base = (row_index % 2 == 0)
+
             for col_index, lon in enumerate(refined_lons):
+                # refined_n = 2*n-1, so every even/even refined node is exactly
+                # an already-calculated base-grid node. Reuse it directly
+                # instead of repeating the full acoustic calculation.
+                if row_is_base and col_index % 2 == 0:
+                    refined_row.append(base_matrix[base_row_index][col_index // 2])
+                    continue
+
                 lat_f = float(lat)
                 lon_f = float(lon)
                 base_col_f = col_index * (n - 1) / max(refined_n - 1, 1)
-
-                if not point_in_polygon(lat_f, lon_f, polygon):
-                    refined_row.append(None)
-                    continue
-                if any(
-                    building.enabled
-                    and len(building.points) >= 3
-                    and point_in_polygon(lat_f, lon_f, building.points)
-                    for building in payload.buildings
-                ):
-                    refined_row.append(None)
-                    continue
 
                 px, py = latlon_to_xy(lat_f, lon_f, lat0, lon0)
                 near_obstacle = any(
@@ -2759,13 +2757,17 @@ def calculate(payload: CalculationRequest):
                 )
 
                 if near_obstacle:
+                    # evaluate_grid_point performs the polygon/building masks,
+                    # so avoid doing those checks twice here.
                     refined_row.append(evaluate_grid_point(lat_f, lon_f))
+                    continue
+
+                interpolated = bilinear_base(base_row_f, base_col_f)
+                if interpolated is not None:
+                    refined_row.append(interpolated)
                 else:
-                    interpolated = bilinear_base(base_row_f, base_col_f)
-                    refined_row.append(
-                        interpolated if interpolated is not None
-                        else evaluate_grid_point(lat_f, lon_f)
-                    )
+                    refined_row.append(evaluate_grid_point(lat_f, lon_f))
+
             refined_matrix.append(refined_row)
 
         matrix = refined_matrix
