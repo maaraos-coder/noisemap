@@ -4638,3 +4638,77 @@ select {
   border-color: #111827;
   box-shadow: 0 0 0 2px rgba(17,24,39,.14), 0 3px 9px rgba(0,0,0,.16);
 }
+
+
+/* Project JSON layer import/export */
+.project-layer-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 7px;
+  color: #72808d;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.project-layer-divider::before,
+.project-layer-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #dce3e9;
+}
+
+.project-export-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.project-export-grid > button {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #26313b;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-export-grid > button:hover {
+  background: #eef4f8;
+  border-color: #c7d4df;
+}
+
+.project-export-grid > button > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #173f68;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.project-export-grid strong,
+.project-export-grid small {
+  display: block;
+}
+
+.project-export-grid strong {
+  font-size: 9px;
+}
+
+.project-export-grid small {
+  margin-top: 2px;
+  color: #798693;
+  font-size: 8px;
+}
