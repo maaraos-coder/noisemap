@@ -1057,6 +1057,7 @@ function App() {
   const mapRef = useRef(null)
   const coursePresetLoadedRef = useRef(false)
   const projectFileInputRef = useRef(null)
+  const layerFileInputRef = useRef(null)
   const cutCanvasRef = useRef(null)
   const objectCardRef = useRef(null)
 
@@ -1520,6 +1521,173 @@ function App() {
     }
   }
 
+  const downloadJsonFile = (payload, filename) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportObjectLayer = (kind) => {
+    const collections = {
+      sources,
+      receivers,
+      barriers,
+      buildings,
+      roads,
+      accessories,
+      contours
+    }
+    const items = collections[kind]
+    if (!Array.isArray(items)) return
+
+    const labels = {
+      sources: 'fuentes',
+      receivers: 'receptores',
+      barriers: 'barreras',
+      buildings: 'edificios',
+      roads: 'trafico-vial',
+      accessories: 'lineas-auxiliares',
+      contours: 'curvas-nivel'
+    }
+    const stamp = new Date().toISOString().slice(0, 10)
+    const payload = {
+      format: 'NoiseMapUCObjects',
+      version: 1,
+      object_type: kind,
+      saved_at: new Date().toISOString(),
+      items
+    }
+
+    downloadJsonFile(payload, `${labels[kind] || kind}-${stamp}.json`)
+    setProjectMessage(`${items.length} ${labels[kind] || kind} exportados.`)
+  }
+
+  const uniqueImportedId = (candidate, usedIds, prefix) => {
+    const base = String(candidate || prefix || 'objeto')
+    if (!usedIds.has(base)) {
+      usedIds.add(base)
+      return base
+    }
+    let index = 2
+    let next = `${base}-${index}`
+    while (usedIds.has(next)) {
+      index += 1
+      next = `${base}-${index}`
+    }
+    usedIds.add(next)
+    return next
+  }
+
+  const importObjectFiles = async event => {
+    const files = Array.from(event.target.files || [])
+    if (!files.length) return
+
+    const existing = {
+      sources: new Set(sources.map(item => String(item.id))),
+      receivers: new Set(receivers.map(item => String(item.id))),
+      barriers: new Set(barriers.map(item => String(item.id))),
+      buildings: new Set(buildings.map(item => String(item.id))),
+      roads: new Set(roads.map(item => String(item.id))),
+      accessories: new Set(accessories.map(item => String(item.id))),
+      contours: new Set(contours.map(item => String(item.id)))
+    }
+
+    const merged = {
+      sources: [],
+      receivers: [],
+      barriers: [],
+      buildings: [],
+      roads: [],
+      accessories: [],
+      contours: []
+    }
+
+    const supported = Object.keys(merged)
+    const counts = Object.fromEntries(supported.map(key => [key, 0]))
+    const errors = []
+
+    const appendItems = (kind, items) => {
+      if (!supported.includes(kind) || !Array.isArray(items)) return
+      items.forEach((item, index) => {
+        const imported = {
+          ...item,
+          id: uniqueImportedId(item?.id, existing[kind], `${kind}-import-${index + 1}`)
+        }
+        merged[kind].push(imported)
+        counts[kind] += 1
+      })
+    }
+
+    for (const file of files) {
+      try {
+        const payload = JSON.parse(await file.text())
+
+        if (payload?.format === 'NoiseMapUCObjects') {
+          appendItems(payload.object_type, payload.items)
+          continue
+        }
+
+        // A full project can also be imported as object layers without
+        // replacing the current camera, calculation area or settings.
+        if (payload?.format === 'NoiseMapUCProject' && payload?.data) {
+          supported.forEach(kind => appendItems(kind, payload.data[kind]))
+          continue
+        }
+
+        // Simple portable JSON fallback:
+        // { sources:[...], receivers:[...] } or a single named collection.
+        let recognized = false
+        supported.forEach(kind => {
+          if (Array.isArray(payload?.[kind])) {
+            appendItems(kind, payload[kind])
+            recognized = true
+          }
+        })
+        if (!recognized) {
+          errors.push(`${file.name}: formato no reconocido`)
+        }
+      } catch (error) {
+        errors.push(`${file.name}: JSON inválido`)
+      }
+    }
+
+    if (merged.sources.length) setSources(prev => [...prev, ...merged.sources])
+    if (merged.receivers.length) setReceivers(prev => [...prev, ...merged.receivers])
+    if (merged.barriers.length) setBarriers(prev => [...prev, ...merged.barriers])
+    if (merged.buildings.length) setBuildings(prev => [...prev, ...merged.buildings])
+    if (merged.roads.length) setRoads(prev => [...prev, ...merged.roads])
+    if (merged.accessories.length) setAccessories(prev => [...prev, ...merged.accessories])
+    if (merged.contours.length) setContours(prev => [...prev, ...merged.contours])
+
+    const total = Object.values(counts).reduce((sum, value) => sum + value, 0)
+    if (total) {
+      setResult(null)
+      setDirty(true)
+      setSelected(null)
+    }
+
+    const summary = supported
+      .filter(kind => counts[kind] > 0)
+      .map(kind => `${counts[kind]} ${kind}`)
+      .join(' · ')
+
+    setProjectMessage(
+      total
+        ? `Objetos agregados al mapa: ${summary}.${errors.length ? ` Avisos: ${errors.join(' · ')}` : ''}`
+        : (errors.join(' · ') || 'No se encontraron objetos importables.')
+    )
+
+    event.target.value = ''
+  }
+
   const saveProject = () => {
     const payload = {
       format: 'NoiseMapUCProject',
@@ -1555,18 +1723,8 @@ function App() {
       }
     }
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: 'application/json;charset=utf-8'
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
     const stamp = new Date().toISOString().slice(0, 10)
-    a.href = url
-    a.download = `proyecto-mapa-ruido-${stamp}.noisemap.json`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    downloadJsonFile(payload, `proyecto-mapa-ruido-${stamp}.noisemap.json`)
     setProjectMessage('Proyecto guardado. Conserva este archivo para continuar más adelante.')
   }
 
@@ -4434,6 +4592,15 @@ function App() {
         style={{ display: 'none' }}
       />
 
+      <input
+        ref={layerFileInputRef}
+        type="file"
+        multiple
+        accept=".json,.noisemap.json,application/json"
+        onChange={importObjectFiles}
+        style={{ display: 'none' }}
+      />
+
       {projectOpen && (
         <div className="layers-popover project-popover">
           <div className="project-popover-header">
@@ -4464,9 +4631,45 @@ function App() {
             </div>
           </button>
 
+          <div className="project-layer-divider">
+            <span>CAPAS / OBJETOS JSON</span>
+          </div>
+
+          <button
+            type="button"
+            className="project-menu-action"
+            onClick={() => layerFileInputRef.current?.click()}
+          >
+            <span>＋</span>
+            <div>
+              <strong>Importar objetos JSON</strong>
+              <small>Selecciona uno o varios archivos; se agregan al mapa actual</small>
+            </div>
+          </button>
+
+          <div className="project-export-grid">
+            <button type="button" onClick={() => exportObjectLayer('sources')}>
+              <span>F</span>
+              <div><strong>Exportar fuentes</strong><small>{sources.length} objetos</small></div>
+            </button>
+            <button type="button" onClick={() => exportObjectLayer('receivers')}>
+              <span>R</span>
+              <div><strong>Exportar receptores</strong><small>{receivers.length} objetos</small></div>
+            </button>
+            <button type="button" onClick={() => exportObjectLayer('barriers')}>
+              <span>B</span>
+              <div><strong>Exportar barreras</strong><small>{barriers.length} objetos</small></div>
+            </button>
+            <button type="button" onClick={() => exportObjectLayer('buildings')}>
+              <span>E</span>
+              <div><strong>Exportar edificios</strong><small>{buildings.length} objetos</small></div>
+            </button>
+          </div>
+
           <div className="project-help compact">
-            Conserva fuentes, tráfico vial, receptores, barreras, edificios, topografía,
-            espectros, configuración y último cálculo.
+            “Abrir proyecto” reemplaza el escenario completo. “Importar objetos JSON” fusiona
+            uno o varios archivos con el mapa actual sin borrar lo existente. Los IDs repetidos
+            se renombran automáticamente.
           </div>
 
           {projectMessage && (
