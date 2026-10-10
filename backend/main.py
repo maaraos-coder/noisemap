@@ -502,6 +502,24 @@ def _source_spectral_result(
     control_kind = (source_input.noise_control_type or "none").lower()
     enclosure_control = control_kind in ("enclosure", "semi", "enclosure_silencer")
 
+    # Geometry of a source-receiver path does not change with frequency.
+    # Reusing the adjusted barrier list avoids repeating line intersections and
+    # terrain lookups for every octave band.
+    static_path_barriers = None
+    if not enclosure_control:
+        static_path_barriers = _barriers_for_source_receiver_path(
+            source_input.lat,
+            source_input.lon,
+            receiver_lat,
+            receiver_lon,
+            barriers,
+            terrain_samples,
+            lat0,
+            lon0,
+        )
+
+    enclosure_path_cache: dict[tuple[float, float], list[Barrier]] = {}
+
     def propagate_at_frequency(lw_input: float, frequency_hz: float) -> float:
         band_settings = _settings_for_band(base_settings, frequency_hz)
 
@@ -520,16 +538,20 @@ def _source_spectral_result(
                 return float("-inf")
             emitter_levels = []
             for emitter in emitters:
-                path_barriers = _barriers_for_source_receiver_path(
-                    emitter.lat,
-                    emitter.lon,
-                    receiver_lat,
-                    receiver_lon,
-                    barriers,
-                    terrain_samples,
-                    lat0,
-                    lon0,
-                )
+                emitter_key = (round(float(emitter.lat), 10), round(float(emitter.lon), 10))
+                path_barriers = enclosure_path_cache.get(emitter_key)
+                if path_barriers is None:
+                    path_barriers = _barriers_for_source_receiver_path(
+                        emitter.lat,
+                        emitter.lon,
+                        receiver_lat,
+                        receiver_lon,
+                        barriers,
+                        terrain_samples,
+                        lat0,
+                        lon0,
+                    )
+                    enclosure_path_cache[emitter_key] = path_barriers
                 emitter_levels.append(
                     level_at_point(
                         [emitter],
@@ -581,16 +603,7 @@ def _source_spectral_result(
             enabled=source_input.enabled,
             ground_elevation_m=source_ground_elevation_m,
         )
-        path_barriers = _barriers_for_source_receiver_path(
-            source_model.lat,
-            source_model.lon,
-            receiver_lat,
-            receiver_lon,
-            barriers,
-            terrain_samples,
-            lat0,
-            lon0,
-        )
+        path_barriers = static_path_barriers if static_path_barriers is not None else barriers
         lp = level_at_point(
             [source_model],
             receiver_lat,
