@@ -2323,6 +2323,14 @@ function App() {
             source,
             receiver,
             barrier,
+            sources: sources.map(item =>
+              item.id === source.id ? source : item
+            ),
+            roads,
+            barriers: barriers.map(item =>
+              item.id === barrier.id ? barrier : item
+            ),
+            buildings,
             contours,
             settings: {
               resolution,
@@ -2362,6 +2370,8 @@ function App() {
     sources,
     receivers,
     barriers,
+    buildings,
+    roads,
     contours,
     profileDraft,
     resolution,
