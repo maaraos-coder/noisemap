@@ -773,13 +773,33 @@ function energeticTotal(values) {
   return 10 * Math.log10(sum)
 }
 
+const SOURCE_OCTAVE_BANDS = [63,125,250,500,1000,2000,4000,8000]
+
+function sourcePowerComplete(source, modeOverride = null, octaveOverride = null, lwOverride = undefined) {
+  const mode = modeOverride || source?.spectrum_mode || 'broadband'
+  if (mode === 'octaves') {
+    const levels = octaveOverride || source?.octave_levels || {}
+    return SOURCE_OCTAVE_BANDS.every(freq => {
+      const value = levels?.[freq] ?? levels?.[String(freq)]
+      return value !== '' && value != null && Number.isFinite(Number(value))
+    })
+  }
+
+  const raw = lwOverride !== undefined ? lwOverride : source?.lw_db
+  return raw !== '' && raw != null && Number.isFinite(Number(raw))
+}
+
 function sourceEquivalentLevel(source, aWeighting) {
   if (source.spectrum_mode === 'octaves') {
-    const vals = Object.entries(source.octave_levels || {}).map(([f, level]) => {
-      const correction = aWeighting ? (A_CORRECTIONS[Number(f)] || 0) : 0
-      return Number(level) + correction
-    })
-    return energeticTotal(vals) ?? Number(source.lw_db)
+    const vals = SOURCE_OCTAVE_BANDS
+      .map(f => {
+        const level = source.octave_levels?.[f] ?? source.octave_levels?.[String(f)]
+        if (level === '' || level == null || !Number.isFinite(Number(level))) return null
+        const correction = aWeighting ? (A_CORRECTIONS[Number(f)] || 0) : 0
+        return Number(level) + correction
+      })
+      .filter(v => Number.isFinite(v))
+    return energeticTotal(vals) ?? (Number.isFinite(Number(source.lw_db)) ? Number(source.lw_db) : 0)
   }
   if (source.spectrum_mode === 'single') {
     const nearest = Object.keys(A_CORRECTIONS)
@@ -793,7 +813,7 @@ function sourceEquivalentLevel(source, aWeighting) {
 
 
 function sourceMarkerLabel(source, aWeighting) {
-  if (source.course_power_pending || source.lw_db == null || source.lw_db === '') {
+  if (!sourcePowerComplete(source)) {
     return {
       main: 'Lw pendiente',
       sub: 'Ingresa potencia'
@@ -1638,13 +1658,13 @@ function App() {
     if (!calcSources.some(s => s.enabled)) return
 
     const pendingCourseSources = calcSources.filter(
-      s => s.enabled && (s.course_power_pending || s.lw_db == null || s.lw_db === '')
+      s => s.enabled && !sourcePowerComplete(s)
     )
     if (pendingCourseSources.length) {
       alert(
-        'Antes de calcular, ingresa el LwA de: ' +
+        'Antes de calcular, completa la potencia sonora de: ' +
         pendingCourseSources.map(s => s.name).join(', ') +
-        '. Estos valores deben provenir de tu conversión de la Etapa 8.'
+        '. En Broadband/Single ingresa el nivel; en Octavas completa las 8 bandas (63 Hz–8 kHz).'
       )
       return
     }
@@ -4699,7 +4719,7 @@ function App() {
                     <tr>
                       <th>Receptor</th>
                       <th>Altura</th>
-                      {[63,125,250,500,1000,2000,4000,8000].map(freq => (
+                      {SOURCE_OCTAVE_BANDS.map(freq => (
                         <th key={freq}>{freq >= 1000 ? freq/1000 + 'k' : freq}</th>
                       ))}
                       <th>Total {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</th>
@@ -5131,7 +5151,10 @@ function App() {
                 ].map(([value,label]) => (
                   <button key={value}
                     className={selectedObject.spectrum_mode === value ? 'active' : ''}
-                    onClick={() => patchSelected({ spectrum_mode:value })}>
+                    onClick={() => patchSelected({
+                      spectrum_mode:value,
+                      course_power_pending: !sourcePowerComplete(selectedObject, value)
+                    })}>
                     {label}
                   </button>
                 ))}
@@ -5139,7 +5162,7 @@ function App() {
 
               <h4 className="subheading">Niveles de potencia sonora</h4>
 
-              {selectedObject.course_power_pending && (
+              {!sourcePowerComplete(selectedObject) && (
                 <div className="engine-note">
                   Etapa 8 · La posición y altura ya están definidas. Ingresa aquí el LwA que calculaste en el ejercicio antes de modelar.
                 </div>
@@ -5150,10 +5173,13 @@ function App() {
                   <span>LwA</span>
                   <input type="number" value={selectedObject.lw_db ?? ''}
                     placeholder="Ingresa LwA"
-                    onChange={e => patchSelected({
-                      lw_db: e.target.value === '' ? null : Number(e.target.value),
-                      course_power_pending: e.target.value === ''
-                    })} />
+                    onChange={e => {
+                      const nextLw = e.target.value === '' ? null : Number(e.target.value)
+                      patchSelected({
+                        lw_db: nextLw,
+                        course_power_pending: !sourcePowerComplete(selectedObject, 'broadband', null, nextLw)
+                      })
+                    }} />
                   <b>dB(A)</b>
                 </div>
               )}
@@ -5168,8 +5194,14 @@ function App() {
                   </div>
                   <div className="inline-field">
                     <span>Nivel</span>
-                    <input type="number" value={selectedObject.lw_db}
-                      onChange={e => patchSelected({ lw_db:Number(e.target.value) })} />
+                    <input type="number" value={selectedObject.lw_db ?? ''}
+                      onChange={e => {
+                        const nextLw = e.target.value === '' ? null : Number(e.target.value)
+                        patchSelected({
+                          lw_db: nextLw,
+                          course_power_pending: !sourcePowerComplete(selectedObject, 'single', null, nextLw)
+                        })
+                      }} />
                     <b>dB</b>
                   </div>
                   <div className="calculated-field">
@@ -5187,12 +5219,23 @@ function App() {
                         <span>{freq >= 1000 ? freq/1000 + 'k' : freq}</span>
                         <input type="number"
                           value={selectedObject.octave_levels?.[freq] ?? ''}
-                          onChange={e => patchSelected({
-                            octave_levels:{
-                              ...(selectedObject.octave_levels || {}),
-                              [freq]:Number(e.target.value)
+                          onChange={e => {
+                            const nextLevels = { ...(selectedObject.octave_levels || {}) }
+                            if (e.target.value === '') {
+                              delete nextLevels[freq]
+                              delete nextLevels[String(freq)]
+                            } else {
+                              nextLevels[freq] = Number(e.target.value)
                             }
-                          })} />
+                            patchSelected({
+                              octave_levels: nextLevels,
+                              course_power_pending: !sourcePowerComplete(
+                                selectedObject,
+                                'octaves',
+                                nextLevels
+                              )
+                            })
+                          }} />
                       </label>
                     ))}
                   </div>
@@ -5201,7 +5244,9 @@ function App() {
                     <strong>{sourceEquivalentLevel(selectedObject, globalSettings.a_weighting).toFixed(1)} {globalSettings.a_weighting ? 'dB(A)' : 'dB'}</strong>
                   </div>
                   <div className="engine-note">
-                    En el mapa se muestra este total energético sobre la F. El detalle por banda permanece en esta ficha.
+                    {sourcePowerComplete(selectedObject)
+                      ? 'Espectro completo. La fuente queda habilitada para el cálculo sin necesidad de ingresar Broadband.'
+                      : 'Completa las 8 bandas de 63 Hz a 8 kHz. No necesitas ingresar un valor Broadband.'}
                   </div>
                 </>
               )}
