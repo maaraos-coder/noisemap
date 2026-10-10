@@ -1102,6 +1102,13 @@ class BarrierProfileRequest(BaseModel):
     source: SourceIn
     receiver: ReceiverIn
     barrier: BarrierIn
+    # Full scenario is optional for backwards compatibility. When supplied,
+    # the projected receptor level is calculated with the same sources,
+    # traffic, barriers and buildings as the main map.
+    sources: List[SourceIn] = []
+    roads: List[RoadIn] = []
+    barriers: List[BarrierIn] = []
+    buildings: List[BuildingIn] = []
     contours: List[ContourIn] = []
     settings: GridSettings = GridSettings()
 
@@ -2445,18 +2452,80 @@ def barrier_profile(payload: BarrierProfileRequest):
     )
     profile_settings.a_weighting = payload.settings.a_weighting
 
-    receiver_projection = _source_spectral_result(
-        s,
+    # Keep the geometric profile metrics tied to the selected source/barrier,
+    # but calculate the receptor level with the complete acoustic scenario so
+    # the value shown here matches the receiver value on the main map.
+    scenario_sources = list(payload.sources) if payload.sources else [s]
+    scenario_roads = list(payload.roads)
+    all_profile_sources = _expand_sources(
+        scenario_sources,
+        scenario_roads,
+        payload.settings.temperature_c,
+    )
+
+    scenario_barrier_inputs = list(payload.barriers) if payload.barriers else [b]
+    scenario_barriers = _barriers_with_buildings(
+        scenario_barrier_inputs,
+        payload.buildings,
+        terrain_samples,
+        lat0,
+        lon0,
+    )
+    profile_source_ground_elevations = {
+        source.id: _terrain_elevation(
+            terrain_samples, source.lat, source.lon, lat0, lon0
+        )
+        for source in all_profile_sources
+    }
+
+    receiver_total = _combined_spectral_level_at_point(
+        all_profile_sources,
         r.lat,
         r.lon,
         r.height_m,
-        [barrier_model],
+        scenario_barriers,
         profile_settings,
         lat0,
         lon0,
         terrain_samples=terrain_samples,
         receiver_ground_elevation_m=receiver_ground,
+        source_ground_elevations=profile_source_ground_elevations,
+        buildings=payload.buildings,
     )
+
+    # Preserve the per-band panel using the same full scenario.
+    profile_band_values = {str(band): [] for band in OCTAVE_BANDS}
+    for source in all_profile_sources:
+        if not source.enabled:
+            continue
+        source_result = _source_spectral_result(
+            source,
+            r.lat,
+            r.lon,
+            r.height_m,
+            scenario_barriers,
+            profile_settings,
+            lat0,
+            lon0,
+            terrain_samples=terrain_samples,
+            receiver_ground_elevation_m=receiver_ground,
+            source_ground_elevation_m=profile_source_ground_elevations.get(source.id),
+            buildings=payload.buildings,
+        )
+        for band in OCTAVE_BANDS:
+            value = source_result.get("bands_db", {}).get(str(band))
+            if value is not None and np.isfinite(value):
+                profile_band_values[str(band)].append(float(value))
+
+    receiver_bands = {}
+    for band in OCTAVE_BANDS:
+        values = profile_band_values[str(band)]
+        total_band = energetic_sum_db(values)
+        receiver_bands[str(band)] = (
+            round(float(total_band), 3)
+            if values and np.isfinite(total_band)
+            else None
+        )
 
     return {
         "intersects": bool(hit),
@@ -2481,13 +2550,16 @@ def barrier_profile(payload: BarrierProfileRequest):
         "selected_attenuation_db": round(float(selected_attenuation), 2),
         "attenuation_by_band_db": attenuation_by_band,
         "receiver_level_db": (
-            round(float(receiver_projection["total_db"]), 2)
-            if receiver_projection.get("total_db") is not None
-            and np.isfinite(receiver_projection["total_db"])
+            round(float(receiver_total), 2)
+            if np.isfinite(receiver_total)
             else None
         ),
-        "receiver_bands_db": receiver_projection.get("bands_db", {}),
-        "receiver_mode": receiver_projection.get("mode"),
+        "receiver_bands_db": receiver_bands,
+        "receiver_mode": (
+            "scenario"
+            if payload.sources or payload.roads or payload.barriers or payload.buildings
+            else s.spectrum_mode
+        ),
     }
 
 
