@@ -31,6 +31,59 @@ const OSM_STYLE = {
   layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
 }
 
+
+const SATELLITE_STYLE = {
+  version: 8,
+  sources: {
+    satellite: {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
+      tileSize: 256,
+      attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+    }
+  },
+  layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }]
+}
+
+const SATELLITE_LABELS_STYLE = {
+  version: 8,
+  sources: {
+    satellite: {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
+      tileSize: 256,
+      attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+    },
+    labels: {
+      type: 'raster',
+      tiles: [
+        'https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png'
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors © CARTO'
+    }
+  },
+  layers: [
+    { id: 'satellite', type: 'raster', source: 'satellite' },
+    {
+      id: 'labels',
+      type: 'raster',
+      source: 'labels',
+      paint: { 'raster-opacity': 0.92 }
+    }
+  ]
+}
+
+const MAP_BASE_STYLES = {
+  osm: OSM_STYLE,
+  satellite: SATELLITE_STYLE,
+  satellite_labels: SATELLITE_LABELS_STYLE
+}
+
 const initialSources = []
 const initialReceivers = []
 const defaultPolygon = []
@@ -1143,6 +1196,7 @@ function App() {
   const [sourceCardPos, setSourceCardPos] = useState(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
+  const [mapBase, setMapBase] = useState('osm')
   const [resultsOpen, setResultsOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [projectMessage, setProjectMessage] = useState('')
@@ -1719,6 +1773,7 @@ function App() {
         vmin,
         vmax,
         layers,
+        mapBase,
         result
       }
     }
@@ -1762,6 +1817,7 @@ function App() {
       if (Number.isFinite(Number(data.vmin))) setVmin(Number(data.vmin))
       if (Number.isFinite(Number(data.vmax))) setVmax(Number(data.vmax))
       if (data.layers) setLayers(data.layers)
+      if (['osm', 'satellite', 'satellite_labels'].includes(data.mapBase)) setMapBase(data.mapBase)
       setResult(data.result || null)
 
       setSelected(null)
@@ -3380,7 +3436,7 @@ function App() {
           bearing: 0,
           pitch: 0
         }}
-        mapStyle={OSM_STYLE}
+        mapStyle={MAP_BASE_STYLES[mapBase] || OSM_STYLE}
         onClick={onMapClick}
         onMouseMove={onMapMouseMove}
         onMove={event => setMapZoom(Number(event.viewState?.zoom ?? event.target?.getZoom?.() ?? mapZoom))}
@@ -4559,6 +4615,30 @@ function App() {
       {layersOpen && (
         <div className="layers-popover">
           <div className="popover-title">Capas</div>
+
+          <div className="basemap-section">
+            <span className="basemap-section-title">MAPA BASE</span>
+            <div className="basemap-options">
+              {[
+                ['osm', 'Mapa', 'OpenStreetMap'],
+                ['satellite', 'Satélite', 'Imagen aérea'],
+                ['satellite_labels', 'Híbrido', 'Satélite + nombres']
+              ].map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`basemap-option ${mapBase === value ? 'active' : ''}`}
+                  onClick={() => setMapBase(value)}
+                  title={hint}
+                >
+                  <strong>{label}</strong>
+                  <small>{hint}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="basemap-divider" />
           {[
             ['raster', 'Mapa de ruido'],
             ['sources', 'Fuentes'],
