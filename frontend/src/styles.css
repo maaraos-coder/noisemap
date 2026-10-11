@@ -4712,3 +4712,72 @@ select {
   color: #798693;
   font-size: 8px;
 }
+
+
+/* Basemap selector */
+.basemap-section {
+  margin: 2px 0 10px;
+}
+
+.basemap-section-title {
+  display: block;
+  margin-bottom: 7px;
+  color: #6d7b88;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.basemap-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.basemap-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ea;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: #25313b;
+  text-align: left;
+  cursor: pointer;
+}
+
+.basemap-option:hover {
+  background: #eef4f8;
+  border-color: #c6d4df;
+}
+
+.basemap-option.active {
+  border-color: #176b9b;
+  background: #edf7fc;
+  box-shadow: inset 3px 0 0 #176b9b;
+}
+
+.basemap-option strong,
+.basemap-option small {
+  display: block;
+}
+
+.basemap-option strong {
+  font-size: 10px;
+}
+
+.basemap-option small {
+  color: #788794;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.basemap-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: #e1e7ec;
+}
