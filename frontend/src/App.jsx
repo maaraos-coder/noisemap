@@ -619,12 +619,13 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
     ]
   }
 
-  const features = []
+  const segmentsByThreshold = new Map(thresholds.map(value => [value, []]))
+
   thresholds.forEach(threshold => {
+    const segments = segmentsByThreshold.get(threshold)
+
     for (let row = 0; row < rows - 1; row += 1) {
       for (let col = 0; col < cols - 1; col += 1) {
-        // Contours must not interpolate through a physical screen. The barrier
-        // layer itself visually closes this narrow gap on the map.
         if (crossingCells.has(`${row}:${col}`)) continue
 
         const vTL = levels[row]?.[col]
@@ -637,6 +638,7 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
         const pTR = pointAt(row, col + 1)
         const pBR = pointAt(row + 1, col + 1)
         const pBL = pointAt(row + 1, col)
+
         const intersections = []
         const cross = (v1, v2) => (
           (Number(v1) < threshold && Number(v2) >= threshold) ||
@@ -649,16 +651,8 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
         if (cross(vBL, vTL)) intersections.push({ edge:'left', point:interpolate(pBL, vBL, pTL, vTL, threshold) })
 
         const addSegment = (a, b) => {
-          const [r,g,bv] = levelColor(threshold, vmin, vmax)
-          features.push({
-            type:'Feature',
-            properties:{
-              level_db:threshold,
-              major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0,
-              line_color:`rgb(${r},${g},${bv})`
-            },
-            geometry:{ type:'LineString', coordinates:[a.point, b.point] }
-          })
+          if (!a?.point || !b?.point) return
+          segments.push([a.point, b.point])
         }
 
         if (intersections.length === 2) {
@@ -676,6 +670,88 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
         }
       }
     }
+  })
+
+  // Marching-squares originally returned one tiny LineString per raster cell.
+  // At high resolutions those thousands of short segments are anti-aliased by
+  // MapLibre as a regular field of dots. Stitch neighbouring segments into
+  // continuous polylines before handing them to the map.
+  const coordKey = point => `${Number(point[0]).toFixed(10)},${Number(point[1]).toFixed(10)}`
+  const samePoint = (a, b) => coordKey(a) === coordKey(b)
+
+  const stitchSegments = segments => {
+    if (!segments.length) return []
+
+    const unused = segments.map(segment => [segment[0], segment[1]])
+    const endpointMap = new Map()
+
+    const register = (key, index) => {
+      if (!endpointMap.has(key)) endpointMap.set(key, new Set())
+      endpointMap.get(key).add(index)
+    }
+
+    unused.forEach((segment, index) => {
+      register(coordKey(segment[0]), index)
+      register(coordKey(segment[1]), index)
+    })
+
+    const consumed = new Set()
+    const lines = []
+
+    const nextAt = point => {
+      const candidates = endpointMap.get(coordKey(point))
+      if (!candidates) return null
+      for (const index of candidates) {
+        if (!consumed.has(index)) return index
+      }
+      return null
+    }
+
+    for (let seed = 0; seed < unused.length; seed += 1) {
+      if (consumed.has(seed)) continue
+      consumed.add(seed)
+      const line = [unused[seed][0], unused[seed][1]]
+
+      let guard = 0
+      while (guard < unused.length) {
+        guard += 1
+        const index = nextAt(line[line.length - 1])
+        if (index == null) break
+        consumed.add(index)
+        const segment = unused[index]
+        line.push(samePoint(segment[0], line[line.length - 1]) ? segment[1] : segment[0])
+      }
+
+      guard = 0
+      while (guard < unused.length) {
+        guard += 1
+        const index = nextAt(line[0])
+        if (index == null) break
+        consumed.add(index)
+        const segment = unused[index]
+        line.unshift(samePoint(segment[0], line[0]) ? segment[1] : segment[0])
+      }
+
+      if (line.length >= 2) lines.push(line)
+    }
+
+    return lines
+  }
+
+  const features = []
+  thresholds.forEach(threshold => {
+    const [r, g, bv] = levelColor(threshold, vmin, vmax)
+    stitchSegments(segmentsByThreshold.get(threshold) || []).forEach(coordinates => {
+      features.push({
+        type:'Feature',
+        properties:{
+          level_db:threshold,
+          major: Math.abs(threshold % 10) < 1e-9 ? 1 : 0,
+          line_color:`rgb(${r},${g},${bv})`
+        },
+        geometry:{ type:'LineString', coordinates }
+      })
+    })
   })
 
   return { type:'FeatureCollection', features }
@@ -3470,6 +3546,10 @@ function App() {
             <Layer
               id="noise-isolines-line"
               type="line"
+              layout={{
+                'line-cap': 'butt',
+                'line-join': 'round'
+              }}
               paint={{
                 'line-color': ['get', 'line_color'],
                 'line-opacity': 1,
