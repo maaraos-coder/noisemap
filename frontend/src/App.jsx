@@ -538,12 +538,60 @@ function nearestMatrixValue(levels, x, y) {
   return Number.isFinite(value) ? value : null
 }
 
+// Remove isolated one-cell spikes from the display raster only. This never
+// changes calculated grid values or the separate receiver predictions.
+// Exclude cells traversed by barriers and their immediate neighbours so that
+// the physically discontinuous acoustic shadow remains sharp.
+function suppressRasterSpeckles(levels, bounds, barriers = []) {
+  const rows = levels?.length || 0
+  const cols = rows ? (levels[0]?.length || 0) : 0
+  if (rows < 3 || cols < 3) return levels
+  const crossing = barrierCrossingCellMask(levels, bounds, barriers)
+  const nearBarrier = (r, c) => {
+    for (let dr = -2; dr <= 1; dr += 1) {
+      for (let dc = -2; dc <= 1; dc += 1) {
+        if (crossing.has(`${r + dr}:${c + dc}`)) return true
+      }
+    }
+    return false
+  }
+  const cleaned = levels.map(row => [...row])
+  for (let r = 1; r < rows - 1; r += 1) {
+    for (let c = 1; c < cols - 1; c += 1) {
+      if (nearBarrier(r, c)) continue
+      const center = levels[r]?.[c]
+      if (center == null || !Number.isFinite(Number(center))) continue
+      const neighbours = []
+      for (let dr = -1; dr <= 1; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          if (!dr && !dc) continue
+          const value = levels[r + dr]?.[c + dc]
+          if (value != null && Number.isFinite(Number(value))) neighbours.push(Number(value))
+        }
+      }
+      if (neighbours.length < 6) continue
+      neighbours.sort((a, b) => a - b)
+      const median = (neighbours[3] + neighbours[4]) / 2
+      // Correct only samples sharply inconsistent with their neighbourhood.
+      // Genuine smooth gradients and broad attenuation regions are untouched.
+      if (Math.abs(Number(center) - median) >= 2.5 &&
+          neighbours.filter(v => Math.abs(v - median) <= 2.5).length >= 5) {
+        cleaned[r][c] = median
+      }
+    }
+  }
+  return cleaned
+}
+
 function rasterDataUrl(levels, vmin, vmax, bounds = null, barriers = []) {
   if (!levels?.length || !levels[0]?.length) return null
 
   const rows = levels.length
   const cols = levels[0].length
   const crossingCells = barrierCrossingCellMask(levels, bounds, barriers)
+  const rasterLevels = rows >= 64 || cols >= 64
+    ? suppressRasterSpeckles(levels, bounds, barriers)
+    : levels
   const scale = 8
   const width = Math.max(2, cols * scale)
   const height = Math.max(2, rows * scale)
@@ -565,8 +613,8 @@ function rasterDataUrl(levels, vmin, vmax, bounds = null, barriers = []) {
       // bilinearly blend values from opposite sides of a screen, because that
       // visually leaks high levels into the acoustic shadow.
       const value = crossesBarrier
-        ? nearestMatrixValue(levels, gx, gy)
-        : bilinearMatrixValue(levels, gx, gy)
+        ? nearestMatrixValue(rasterLevels, gx, gy)
+        : bilinearMatrixValue(rasterLevels, gx, gy)
       const index = (py * width + px) * 4
 
       if (value == null || !Number.isFinite(value)) {
