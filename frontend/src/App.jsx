@@ -1408,7 +1408,16 @@ function App() {
   )
 
   const noiseIsolines = useMemo(
-    () => noiseIsolinesGeoJSON(displayLevels, result?.bounds, vmin, vmax, 5, barriers),
+    () => {
+      // At dense grids, small closed isolines around adjacent cell samples
+      // create the visible stippled/dotted overlay on top of the heatmap.
+      // Keep the acoustic raster and receiver predictions untouched.
+      // Only omit this optional contour-line overlay for dense grids.
+      if (displayLevels?.length >= 64 || displayLevels?.[0]?.length >= 64) {
+        return { type: 'FeatureCollection', features: [] }
+      }
+      return noiseIsolinesGeoJSON(displayLevels, result?.bounds, vmin, vmax, 5, barriers)
+    },
     [displayLevels, result, vmin, vmax, barriers]
   )
 
