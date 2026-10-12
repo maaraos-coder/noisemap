@@ -2742,7 +2742,7 @@ def calculate(payload: CalculationRequest):
                 # refined_n = 2*n-1, so every even/even refined node is exactly
                 # an already-calculated base-grid node. Reuse it directly
                 # instead of repeating the full acoustic calculation.
-                if row_is_base and col_index % 2 == 0:
+                if refined_n == 2 * n - 1 and row_is_base and col_index % 2 == 0:
                     refined_row.append(base_matrix[base_row_index][col_index // 2])
                     continue
 
