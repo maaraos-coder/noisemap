@@ -741,7 +741,22 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
   const features = []
   thresholds.forEach(threshold => {
     const [r, g, bv] = levelColor(threshold, vmin, vmax)
+    // A highly sampled grid can produce tiny closed contours around single
+    // cells next to a screen. Thousands of these contours appear as dots.
+    // Suppress only sub-grid display artifacts; never change calculated levels.
+    const centerLat = (south + north) / 2
+    const metersPerLon = 111320 * Math.max(Math.cos(centerLat * Math.PI / 180), 1e-6)
+    const cellWidthM = Math.abs(east - west) * metersPerLon / Math.max(cols - 1, 1)
+    const cellHeightM = Math.abs(north - south) * 111320 / Math.max(rows - 1, 1)
+    const minContourLengthM = 3 * Math.hypot(cellWidthM, cellHeightM)
     stitchSegments(segmentsByThreshold.get(threshold) || []).forEach(coordinates => {
+      let lengthM = 0
+      for (let i = 1; i < coordinates.length; i += 1) {
+        const dx = (coordinates[i][0] - coordinates[i - 1][0]) * metersPerLon
+        const dy = (coordinates[i][1] - coordinates[i - 1][1]) * 111320
+        lengthM += Math.hypot(dx, dy)
+      }
+      if (lengthM < minContourLengthM) return
       features.push({
         type:'Feature',
         properties:{
