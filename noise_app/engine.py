@@ -487,22 +487,62 @@ def barrier_attenuation_db(
         return abs(_cross(vx, vy, ex - sx, ey - sy)) / horizontal_direct
 
     lateral_limit = 8.0 * vertical_deviation
-    side1_relevant = lateral_deviation(ax, ay) <= lateral_limit + 1e-9
-    side2_relevant = lateral_deviation(bx, by) <= lateral_limit + 1e-9
 
-    # Outside the projected finite barrier the direct line of sight is not
-    # screened by this barrier.
-    if u < 0.0 or u > 1.0:
+    def smoothstep01(value: float) -> float:
+        x = min(1.0, max(0.0, float(value)))
+        return x * x * (3.0 - 2.0 * x)
+
+    # Avoid a binary on/off switch for lateral paths at the relevance limit.
+    # A narrow transition band keeps the finite-screen solution continuous
+    # while retaining the ISO relevance criterion away from the boundary.
+    relevance_softness = max(0.25, 0.12 * max(lateral_limit, 1.0))
+
+    def lateral_weight(ex: float, ey: float) -> float:
+        deviation = lateral_deviation(ex, ey)
+        if lateral_limit <= 1e-9:
+            return 0.0
+        lower = max(0.0, lateral_limit - relevance_softness)
+        upper = lateral_limit + relevance_softness
+        if deviation <= lower:
+            return 1.0
+        if deviation >= upper:
+            return 0.0
+        return 1.0 - smoothstep01((deviation - lower) / max(upper - lower, 1e-9))
+
+    side1_weight = lateral_weight(ax, ay)
+    side2_weight = lateral_weight(bx, by)
+
+    # The ideal geometrical shadow boundary of a finite screen is abrupt, but
+    # the diffracted acoustic field is not. The former hard u=0/1 cutoff caused
+    # 8–10 dB jumps between neighbouring map points. Taper the screening within
+    # roughly one first-Fresnel-zone radius of each free end so attenuation
+    # tends continuously to zero as the direct ray reaches the end.
+    #
+    # This taper is a numerical/engineering extension around the finite-screen
+    # shadow boundary; the underlying Dz calculation remains unchanged.
+    nearest_edge_fraction = min(u, 1.0 - u)
+    if nearest_edge_fraction <= 0.0:
         return 0.0
 
+    d1_horizontal = math.hypot(ix - sx, iy - sy)
+    d2_horizontal = math.hypot(rx - ix, ry - iy)
+    wavelength = SPEED_OF_SOUND_M_S / max(float(frequency_hz), 1.0)
+    fresnel_radius = math.sqrt(
+        max(0.0, wavelength * d1_horizontal * d2_horizontal / max(d1_horizontal + d2_horizontal, 1e-9))
+    )
+    edge_transition_m = min(6.0, max(0.75, fresnel_radius))
+    edge_distance_m = nearest_edge_fraction * wall_length
+    edge_weight = smoothstep01(edge_distance_m / edge_transition_m)
+
     energies = [10.0 ** (-a_top / 10.0)]
-    if side1_relevant:
-        energies.append(10.0 ** (-a_side1 / 10.0))
-    if side2_relevant:
-        energies.append(10.0 ** (-a_side2 / 10.0))
+    if side1_weight > 1e-6:
+        energies.append(side1_weight * 10.0 ** (-a_side1 / 10.0))
+    if side2_weight > 1e-6:
+        energies.append(side2_weight * 10.0 ** (-a_side2 / 10.0))
 
     a_bar = -10.0 * math.log10(max(sum(energies), 1e-12))
-    return min(float(max_barrier_db), max(0.0, a_bar))
+    a_bar = min(float(max_barrier_db), max(0.0, a_bar))
+    return a_bar * edge_weight
 
 
 def multiple_barrier_attenuation_db(
