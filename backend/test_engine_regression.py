@@ -287,7 +287,6 @@ class EngineRegressionTests(unittest.TestCase):
 
         source_lat, source_lon = ll(-20.0, 0.0)
         source = Source(
-            id="S",
             name="Fuente",
             lat=source_lat,
             lon=source_lon,
@@ -300,7 +299,7 @@ class EngineRegressionTests(unittest.TestCase):
         a_lat, a_lon = ll(0.0, -10.0)
         b_lat, b_lon = ll(0.0, 10.0)
         barrier = Barrier(
-            id="B",
+            name="Barrera",
             lat_a=a_lat,
             lon_a=a_lon,
             lat_b=b_lat,
