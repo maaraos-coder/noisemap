@@ -619,7 +619,7 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
     ]
   }
 
-  const segmentsByThreshold = new Map(thresholds.map(value => [value, []]))
+  const segmentsByThreshold = new globalThis.Map(thresholds.map(value => [value, []]))
 
   thresholds.forEach(threshold => {
     const segments = segmentsByThreshold.get(threshold)
@@ -683,7 +683,7 @@ function noiseIsolinesGeoJSON(levels, bounds, vmin, vmax, interval = 5, barriers
     if (!segments.length) return []
 
     const unused = segments.map(segment => [segment[0], segment[1]])
-    const endpointMap = new Map()
+    const endpointMap = new globalThis.Map()
 
     const register = (key, index) => {
       if (!endpointMap.has(key)) endpointMap.set(key, new Set())
