@@ -127,6 +127,32 @@ function buildingsGeoJSON(buildings) {
   }
 }
 
+function buildingFacadeGeoJSON(building, facadeIndex) {
+  const points = building?.points || []
+  if (!building?.enabled || points.length < 2) {
+    return { type: 'FeatureCollection', features: [] }
+  }
+
+  const index = Math.max(0, Math.min(points.length - 1, Number(facadeIndex) || 0))
+  const [latA, lonA] = points[index]
+  const [latB, lonB] = points[(index + 1) % points.length]
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {
+        building_id: building.id,
+        facade_index: index,
+        label: `Fachada ${index + 1}`
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [[lonA, latA], [lonB, latB]]
+      }
+    }]
+  }
+}
+
 function barriersGeoJSON(barriers) {
   return {
     type: 'FeatureCollection',
@@ -1367,6 +1393,25 @@ function App() {
     const building = buildings.find(item => item.id === selected.id)
     return building ? buildingsGeoJSON([building]) : { type: 'FeatureCollection', features: [] }
   }, [selected, buildings])
+  const selectedBuildingFacadeData = useMemo(() => {
+    if (selected?.type !== 'building') return { type: 'FeatureCollection', features: [] }
+    const building = buildings.find(item => item.id === selected.id)
+    return buildingFacadeGeoJSON(building, buildingFacadeIndex)
+  }, [selected, buildings, buildingFacadeIndex])
+  const selectedBuildingFacadeLabel = useMemo(() => {
+    if (selected?.type !== 'building') return null
+    const building = buildings.find(item => item.id === selected.id)
+    const points = building?.points || []
+    if (!building?.enabled || points.length < 2) return null
+    const index = Math.max(0, Math.min(points.length - 1, Number(buildingFacadeIndex) || 0))
+    const [latA, lonA] = points[index]
+    const [latB, lonB] = points[(index + 1) % points.length]
+    return {
+      index,
+      lat:(Number(latA) + Number(latB)) / 2,
+      lon:(Number(lonA) + Number(lonB)) / 2
+    }
+  }, [selected, buildings, buildingFacadeIndex])
   const roadData = useMemo(() => roadsGeoJSON(roads), [roads])
   const roadDraftData = useMemo(() => lineGeoJSON(roadDraft), [roadDraft])
   const barrierPreviewData = useMemo(() => {
@@ -3789,6 +3834,29 @@ function App() {
           </Source>
         )}
 
+        {layers.buildings && selected?.type === 'building' && (
+          <Source id="selected-building-facade" type="geojson" data={selectedBuildingFacadeData}>
+            <Layer
+              id="selected-building-facade-halo"
+              type="line"
+              paint={{
+                'line-color': '#ffffff',
+                'line-width': 11,
+                'line-opacity': 0.96
+              }}
+            />
+            <Layer
+              id="selected-building-facade-line"
+              type="line"
+              paint={{
+                'line-color': '#ff7a00',
+                'line-width': 7,
+                'line-opacity': 1
+              }}
+            />
+          </Source>
+        )}
+
         {mode === 'building' && buildingDraft.length >= 2 && (
           <Source id="building-draft" type="geojson" data={buildingDraftData}>
             <Layer
@@ -4148,6 +4216,32 @@ function App() {
             </Marker>
           )
         })}
+
+        {layers.buildings && selectedBuildingFacadeLabel && (
+          <Marker
+            longitude={selectedBuildingFacadeLabel.lon}
+            latitude={selectedBuildingFacadeLabel.lat}
+            anchor="center"
+          >
+            <div
+              style={{
+                pointerEvents:'none',
+                color:'#ffffff',
+                background:'#ff7a00',
+                border:'2px solid #ffffff',
+                borderRadius:'999px',
+                padding:'4px 9px',
+                fontSize:'12px',
+                fontWeight:900,
+                lineHeight:1,
+                boxShadow:'0 2px 8px rgba(17,24,39,.35)',
+                whiteSpace:'nowrap'
+              }}
+            >
+              Fachada {selectedBuildingFacadeLabel.index + 1}
+            </div>
+          </Marker>
+        )}
 
         {layers.sources && sources.map(source => (
           <Marker
@@ -5884,9 +5978,14 @@ function App() {
                 onChange={e => setBuildingFacadeIndex(Number(e.target.value))}
               >
                 {(selectedObject.points || []).map((_, index) => (
-                  <option key={index} value={index}>Fachada {index + 1}</option>
+                  <option key={index} value={index}>
+                    Fachada {index + 1} · V{index + 1} → V{((index + 1) % selectedObject.points.length) + 1}
+                  </option>
                 ))}
               </select>
+              <div className="field-hint">
+                La fachada seleccionada se muestra en <strong style={{color:'#ff7a00'}}>naranjo</strong> sobre el mapa.
+              </div>
 
               <div className="building-receiver-config">
                 <label>Primera altura [m]
