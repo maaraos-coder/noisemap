@@ -1,3 +1,4 @@
+import CoordinateEditor from './CoordinateEditor'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre'
 
@@ -1279,6 +1280,9 @@ function App() {
   const cutCanvasRef = useRef(null)
   const objectCardRef = useRef(null)
 
+  const [coordinateEditor, setCoordinateEditor] = useState(null)
+  const [coordinatePreview, setCoordinatePreview] = useState(null)
+  const [coordinateNotice, setCoordinateNotice] = useState('')
   const [mode, setMode] = useState('navigate')
   const [mapZoom, setMapZoom] = useState(1.35)
   const [sources, setSources] = useState(initialSources)
@@ -3489,6 +3493,35 @@ function App() {
     return distances.sort((a, b) => a.distance - b.distance)[0]
   }, [selectedObject, selected, receivers])
 
+  const previewCoordinates = items => {
+    setCoordinatePreview(items)
+    if (!items) return
+    const pts = items.flatMap(x => x.object.points)
+    const bounds = mapRef.current?.getBounds()
+    setCoordinateNotice(bounds && pts.some(([lat,lon]) => !bounds.contains([lon,lat])) ? 'El objeto estaba fuera del área visible. Vista ajustada a las coordenadas.' : '')
+    const lats=pts.map(p=>p[0]), lons=pts.map(p=>p[1])
+    if(pts.length===1) mapRef.current?.flyTo({center:[lons[0],lats[0]],zoom:18})
+    else mapRef.current?.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]],{padding:100,maxZoom:19})
+  }
+  const commitCoordinates = (items, editing) => {
+    const groups = {source:[],receiver:[],barrier:[],building:[],road:[]}
+    items.forEach(({type,object:o}) => {
+      if(type==='polygon') {setPolygon(o.points);return}
+      const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
+      if(type==='source'||type==='receiver') {base.lat=o.points[0][0];base.lon=o.points[0][1];base.height_mode='specify';delete base.points}
+      if(type==='barrier') {
+        delete base.points
+        for(let i=1;i<o.points.length;i++) groups.barrier.push({...base,id:i===1?base.id:crypto.randomUUID(),name:o.points.length>2?`${o.name} · ${i}`:o.name,lat_a:o.points[i-1][0],lon_a:o.points[i-1][1],lat_b:o.points[i][0],lon_b:o.points[i][1]})
+      } else groups[type].push(base)
+    })
+    Object.entries({source:setSources,receiver:setReceivers,barrier:setBarriers,building:setBuildings,road:setRoads}).forEach(([type,set])=>{
+      if(groups[type].length) set(prev=>[...prev.filter(x=>!editing?.object||x.id!==editing.object.id),...groups[type]])
+    })
+    const first=Object.entries(groups).find(([,items])=>items.length)
+    if(first) setSelected({type:first[0],id:first[1][0].id})
+    setDirty(true);setMode('navigate')
+  }
+
   const patchSelected = patch => {
     if (!selected) return
 
@@ -4464,7 +4497,13 @@ function App() {
             <div className="building-edit-vertex" title={`Vértice ${index + 1}`}>{index + 1}</div>
           </Marker>
         ))}
+        {coordinatePreview && <Source id="coordinate-preview" type="geojson" data={{type:'FeatureCollection',features:coordinatePreview.map(({type,object:o})=>({type:'Feature',properties:{},geometry:o.points.length===1?{type:'Point',coordinates:[o.points[0][1],o.points[0][0]]}:['polygon','building'].includes(type)?{type:'Polygon',coordinates:[[...o.points,o.points[0]].map(([lat,lon])=>[lon,lat])]}:{type:'LineString',coordinates:o.points.map(([lat,lon])=>[lon,lat])}}))}}>
+          <Layer id="coordinate-preview-point" type="circle" filter={['==',['geometry-type'],'Point']} paint={{'circle-radius':9,'circle-color':'#00bcd4','circle-stroke-width':3,'circle-stroke-color':'#fff'}}/>
+          <Layer id="coordinate-preview-line" type="line" filter={['!=',['geometry-type'],'Point']} paint={{'line-width':4,'line-color':'#00bcd4','line-dasharray':[2,1]}}/>
+        </Source>}
       </Map>
+      {coordinateEditor && <CoordinateEditor initial={coordinateEditor} onClose={()=>setCoordinateEditor(null)} onPreview={previewCoordinates} onCommit={commitCoordinates}/>}
+      {coordinateEditor && coordinateNotice && <div className="coord-notice">{coordinateNotice}</div>}
 
       <header className="brand-bar">
         <div className="brand-left">
@@ -4480,7 +4519,10 @@ function App() {
       </header>
 
       <div className="object-toolbar">
-        <div className="object-toolbar-title">Agregar objetos</div>
+        <div className="object-toolbar-title">Agregar objetos · Ubicar en el mapa</div>
+        <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor({type:['source','receiver','barrier','building','road','polygon'].includes(mode)?mode:'source'})}}>Ingresar coordenadas</button>
+        {selectedObject && ['source','receiver','barrier','building','road'].includes(selected?.type) && <button onClick={()=>setCoordinateEditor({type:selected.type,object:selectedObject})}>Editar coordenadas · {selectedObject.name}</button>}
+        {polygon.length>=3 && <button onClick={()=>setCoordinateEditor({type:'polygon',object:{name:'Área de cálculo',points:polygon}})}>Editar coordenadas del área</button>}
         <div className="object-toolbar-actions">
           <IconButton active={mode === 'navigate'} title="Seleccionar / navegar" icon="✥" label="Seleccionar" onClick={() => setMode('navigate')} />
           <IconButton active={mode === 'source'} title="Agregar fuente puntual" icon="◉" label="Fuente (F)" onClick={() => setMode('source')} />

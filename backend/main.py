@@ -490,9 +490,7 @@ def _source_spectral_result(
 ):
     adjustment = _source_adjustment_db(source_input)
     if source_ground_elevation_m is None:
-        source_ground_elevation_m = _terrain_elevation(
-            terrain_samples, source_input.lat, source_input.lon, lat0, lon0
-        )
+        source_ground_elevation_m = _object_ground(source_input, terrain_samples, lat0, lon0)
     if receiver_ground_elevation_m is None:
         receiver_ground_elevation_m = _terrain_elevation(
             terrain_samples, receiver_lat, receiver_lon, lat0, lon0
@@ -993,6 +991,7 @@ class SourceIn(BaseModel):
     name: str
     lat: float
     lon: float
+    ground_elevation_m: Optional[float] = Field(default=None, allow_inf_nan=False)
     height_m: float = 1.5
     lw_db: float = 100.0
     dc_db: float = 0.0
@@ -1071,6 +1070,7 @@ class ReceiverIn(BaseModel):
     name: str
     lat: float
     lon: float
+    ground_elevation_m: Optional[float] = Field(default=None, allow_inf_nan=False)
     height_m: float = 1.5
     visible: bool = True
     height_mode: str = "map"
@@ -1698,6 +1698,11 @@ def _build_terrain_samples(contours, lat0: float, lon0: float):
     return arr[:, 0], arr[:, 1], arr[:, 2]
 
 
+def _object_ground(obj, samples, lat0, lon0):
+    value = getattr(obj, "ground_elevation_m", None)
+    return float(value) if value is not None else _terrain_elevation(samples, obj.lat, obj.lon, lat0, lon0)
+
+
 def _terrain_elevation(samples, lat: float, lon: float, lat0: float, lon0: float) -> float:
     if samples is None:
         return 0.0
@@ -2117,7 +2122,7 @@ def acoustic_cut(payload: AcousticCutRequest):
 
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
     source_ground_elevations = {
-        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        source.id: _object_ground(source, terrain_samples, lat0, lon0)
         for source in all_sources
     }
     barriers = _barriers_with_buildings(
@@ -2235,11 +2240,9 @@ def receiver_preview(payload: ReceiverPreviewRequest):
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
-    receiver_ground_elevation_m = _terrain_elevation(
-        terrain_samples, payload.receiver.lat, payload.receiver.lon, lat0, lon0
-    )
+    receiver_ground_elevation_m = _object_ground(payload.receiver, terrain_samples, lat0, lon0)
     source_ground_elevations = {
-        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        source.id: _object_ground(source, terrain_samples, lat0, lon0)
         for source in all_sources
     }
 
@@ -2365,8 +2368,8 @@ def barrier_profile(payload: BarrierProfileRequest):
     lon0 = (s.lon + r.lon + b.lon_a + b.lon_b) / 4.0
 
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
-    source_ground = _terrain_elevation(terrain_samples, s.lat, s.lon, lat0, lon0)
-    receiver_ground = _terrain_elevation(terrain_samples, r.lat, r.lon, lat0, lon0)
+    source_ground = _object_ground(s, terrain_samples, lat0, lon0)
+    receiver_ground = _object_ground(r, terrain_samples, lat0, lon0)
     source_z = source_ground + s.height_m
     receiver_z = receiver_ground + r.height_m
 
@@ -2485,9 +2488,7 @@ def barrier_profile(payload: BarrierProfileRequest):
         lon0,
     )
     profile_source_ground_elevations = {
-        source.id: _terrain_elevation(
-            terrain_samples, source.lat, source.lon, lat0, lon0
-        )
+        source.id: _object_ground(source, terrain_samples, lat0, lon0)
         for source in all_profile_sources
     }
 
@@ -2617,7 +2618,7 @@ def calculate(payload: CalculationRequest):
     lon0 = sum(lons) / len(lons)
     terrain_samples = _build_terrain_samples(payload.contours, lat0, lon0)
     source_ground_elevations = {
-        source.id: _terrain_elevation(terrain_samples, source.lat, source.lon, lat0, lon0)
+        source.id: _object_ground(source, terrain_samples, lat0, lon0)
         for source in all_sources
     }
     barriers = _barriers_with_buildings(
@@ -2784,9 +2785,7 @@ def calculate(payload: CalculationRequest):
         all_source_totals = []
         combined_band_levels = {str(b): [] for b in OCTAVE_BANDS}
         contribution_items = []
-        receiver_ground = _terrain_elevation(
-            terrain_samples, receiver.lat, receiver.lon, lat0, lon0
-        )
+        receiver_ground = _object_ground(receiver, terrain_samples, lat0, lon0)
 
         for source_input in all_sources:
             if not source_input.enabled:

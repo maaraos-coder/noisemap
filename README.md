@@ -126,3 +126,18 @@ V0.2 / V2:
 - exportación GeoJSON/JSON;
 - vista del camino acústico fuente–barrera–receptor;
 - frontend MapLibre/React si se decide separar la UI de Streamlit.
+
+## Coordenadas (frontend React)
+
+En `v3-react-maplibre`, la barra de objetos conserva la ubicación manual e incluye
+**Ingresar coordenadas**. Seleccione WGS84 (latitud, longitud) o UTM con datum
+WGS84, zona y hemisferio (por defecto 19 Sur). Previsualice antes de confirmar.
+Los objetos seleccionados y el área de cálculo permiten editar sus coordenadas.
+Las barreras de varios vértices se almacenan como tramos consecutivos.
+
+Para fuentes y receptores se puede importar CSV/XLSX/XLS con encabezados
+`name,lat,lon,height_m,ground_elevation_m,lw_db` (potencia solo en fuentes).
+En UTM reemplace `lat,lon` por `easting,northing`; la zona y hemisferio se toman
+del formulario. Todas las filas se validan antes de crear objetos. La cota vacía
+usa la topografía; una cota explícita, incluso cero, define la elevación absoluta
+del terreno sin modificar la altura sobre él. El proyecto JSON conserva los datos.
