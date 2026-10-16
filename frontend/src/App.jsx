@@ -3504,17 +3504,21 @@ function App() {
     else mapRef.current?.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]],{padding:100,maxZoom:19})
   }
   const commitCoordinates = (items, editing) => {
-    const groups = {source:[],receiver:[],barrier:[],building:[],road:[]}
+    const groups = {source:[],receiver:[],barrier:[],building:[],road:[],accessory:[]}
     items.forEach(({type,object:o}) => {
       if(type==='polygon') {setPolygon(o.points);return}
       const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
       if(type==='source'||type==='receiver') {base.lat=o.points[0][0];base.lon=o.points[0][1];base.height_mode='specify';delete base.points}
+      if(type==='accessory') {
+        groups.accessory.push({id:base.id,name:base.name,kind:'measurement',lat_a:o.points[0][0],lon_a:o.points[0][1],lat_b:o.points[1][0],lon_b:o.points[1][1],height_m:0})
+        return
+      }
       if(type==='barrier') {
         delete base.points
         for(let i=1;i<o.points.length;i++) groups.barrier.push({...base,id:i===1?base.id:crypto.randomUUID(),name:o.points.length>2?`${o.name} · ${i}`:o.name,lat_a:o.points[i-1][0],lon_a:o.points[i-1][1],lat_b:o.points[i][0],lon_b:o.points[i][1]})
       } else groups[type].push(base)
     })
-    Object.entries({source:setSources,receiver:setReceivers,barrier:setBarriers,building:setBuildings,road:setRoads}).forEach(([type,set])=>{
+    Object.entries({source:setSources,receiver:setReceivers,barrier:setBarriers,building:setBuildings,road:setRoads,accessory:setAccessories}).forEach(([type,set])=>{
       if(groups[type].length) set(prev=>[...prev.filter(x=>!editing?.object||x.id!==editing.object.id),...groups[type]])
     })
     const first=Object.entries(groups).find(([,items])=>items.length)
@@ -4520,8 +4524,8 @@ function App() {
 
       <div className="object-toolbar">
         <div className="object-toolbar-title">Agregar objetos · Ubicar en el mapa</div>
-        <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor({type:['source','receiver','barrier','building','road','polygon'].includes(mode)?mode:'source'})}}>Ingresar coordenadas</button>
-        {selectedObject && ['source','receiver','barrier','building','road'].includes(selected?.type) && <button onClick={()=>setCoordinateEditor({type:selected.type,object:selectedObject})}>Editar coordenadas · {selectedObject.name}</button>}
+        <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor({type:['source','receiver','barrier','building','road','polygon','line'].includes(mode)?(mode==='line'?'accessory':mode):'source'})}}>Ingresar coordenadas</button>
+        {selectedObject && ['source','receiver','barrier','building','road','accessory'].includes(selected?.type) && <button onClick={()=>setCoordinateEditor({type:selected.type,object:selectedObject})}>Editar coordenadas · {selectedObject.name}</button>}
         {polygon.length>=3 && <button onClick={()=>setCoordinateEditor({type:'polygon',object:{name:'Área de cálculo',points:polygon}})}>Editar coordenadas del área</button>}
         <div className="object-toolbar-actions">
           <IconButton active={mode === 'navigate'} title="Seleccionar / navegar" icon="✥" label="Seleccionar" onClick={() => setMode('navigate')} />
