@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Layer, Marker, Source } from 'react-map-gl/maplibre'
 import { auxiliaryGeoJSON, polygonPoints } from './auxiliaryPolygons'
 
-export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, onUpdate, visible }) {
+export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, onUpdate, onDraftUpdate, visible }) {
   const selected=visible ? polygons.find(p=>p.id===selectedId && p.visible!==false) : null
   const draftGeometry=draft.length>=2 ? {type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'LineString',coordinates:draft.map(([lat,lon])=>[lon,lat])}}]} : {type:'FeatureCollection',features:[]}
   return <>
@@ -13,7 +13,11 @@ export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, o
     <Source id="auxiliary-polygon-draft" type="geojson" data={draftGeometry}>
       <Layer id="auxiliary-polygon-draft-line" type="line" paint={{'line-color':'#2563eb','line-width':3,'line-dasharray':[2,2]}} />
     </Source>
-    {draft.map(([lat,lon],index)=><Marker key={`draft-${index}`} latitude={lat} longitude={lon}><span className="auxiliary-vertex">{index+1}</span></Marker>)}
+    {draft.map(([lat,lon],index)=><Marker key={`draft-${index}`} latitude={lat} longitude={lon} draggable
+      onClick={e=>e.originalEvent.stopPropagation()}
+      onDragEnd={e=>onDraftUpdate(index,[e.lngLat.lat,e.lngLat.lng])}>
+      <button type="button" className="auxiliary-vertex" title={`Arrastrar vértice ${index+1}`}>{index+1}</button>
+    </Marker>)}
     {selected?.points.map(([lat,lon],index)=><Marker key={`${selected.id}-${index}`} latitude={lat} longitude={lon} draggable
       onClick={e=>{e.originalEvent.stopPropagation();onSelect(selected.id)}}
       onDragEnd={e=>onUpdate(selected.id,{points:selected.points.map((p,i)=>i===index?[e.lngLat.lat,e.lngLat.lng]:p)})}>
@@ -22,21 +26,35 @@ export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, o
   </>
 }
 
-export function AuxiliaryPolygonPanel({ polygon, onChange, onClose, onDelete }) {
+export function AuxiliaryPolygonPanel({ polygon, onChange, onClose, onDelete, onEditCoordinates }) {
   const [vertices,setVertices]=useState(polygon.points.map(p=>p.join(', ')).join('\n'))
   const [error,setError]=useState('')
+  const panelRef=useRef(null), dragRef=useRef(null)
+  const [position,setPosition]=useState(null)
+  function startDrag(e) {
+    if(e.button!==0 || e.target.closest('button')) return
+    const rect=panelRef.current.getBoundingClientRect()
+    dragRef.current={dx:e.clientX-rect.left,dy:e.clientY-rect.top}
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  function moveDrag(e) {
+    if(!dragRef.current) return
+    const rect=panelRef.current.getBoundingClientRect()
+    setPosition({x:Math.max(8,Math.min(window.innerWidth-rect.width-8,e.clientX-dragRef.current.dx)),y:Math.max(8,Math.min(window.innerHeight-rect.height-8,e.clientY-dragRef.current.dy))})
+  }
   useEffect(()=>setVertices(polygon.points.map(p=>p.join(', ')).join('\n')),[polygon.points])
-  return <section className="auxiliary-polygon-panel" aria-label="Editar polígono auxiliar">
-    <header><h3>Polígono auxiliar</h3><button type="button" onClick={onClose} aria-label="Cerrar polígono auxiliar">×</button></header>
+  return <div className="coord-backdrop"><section ref={panelRef} className="coord-panel auxiliary-polygon-panel" role="dialog" aria-modal="false" aria-label="Editar polígono auxiliar" style={position?{left:position.x,top:position.y,right:'auto'}:undefined}>
+    <header className="coord-header" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={()=>{dragRef.current=null}} onPointerCancel={()=>{dragRef.current=null}}><div className="object-drag-handle">⋮⋮ Mover ficha</div><button type="button" onClick={onClose} aria-label="Cerrar polígono auxiliar">×</button></header><div className="coord-body"><div className="object-type">REFERENCIA VISUAL</div><h2>Polígono auxiliar</h2>
     <p>Referencia visual del predio o de otra zona. No actúa como edificio, barrera ni área de cálculo.</p>
     <label>Nombre<input value={polygon.name} onChange={e=>onChange({name:e.target.value})}/></label>
     <label>Color<input type="color" value={polygon.color} onChange={e=>onChange({color:e.target.value})}/></label>
     <label>Opacidad del relleno · {Math.round(polygon.fillOpacity*100)} %<input type="range" min="0" max="100" value={Math.round(polygon.fillOpacity*100)} onChange={e=>onChange({fillOpacity:Number(e.target.value)/100})}/></label>
-    <label><input type="checkbox" checked={polygon.visible!==false} onChange={e=>onChange({visible:e.target.checked})}/> Mostrar polígono</label>
+    <label className="auxiliary-visibility"><input type="checkbox" checked={polygon.visible!==false} onChange={e=>onChange({visible:e.target.checked})}/> Mostrar polígono</label>
+    <button type="button" onClick={onEditCoordinates}>Editar coordenadas · WGS84 / UTM</button>
     <p>Arrastra sus vértices en el mapa. Para agregar o quitar vértices, modifica la lista de coordenadas.</p>
     <label>Vértices · una pareja latitud, longitud por línea<textarea rows="5" value={vertices} onChange={e=>setVertices(e.target.value)} /></label>
     <button type="button" onClick={()=>{try { const points=polygonPoints(vertices.trim().split(/\n+/).map(line=>line.split(',').map(v=>v.trim())));onChange({points});setError('') } catch(e) {setError(e.message)}}}>Aplicar vértices</button>
     {error && <p role="alert">{error}</p>}
     <button type="button" onClick={onDelete}>Eliminar este polígono</button>
-  </section>
+  </div></section></div>
 }

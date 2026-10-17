@@ -15,7 +15,7 @@ export function toUTM(lat,lon,zone,hemisphere) {
  return proj4('EPSG:4326',`+proj=utm +zone=${zone} ${hemisphere==='south'?'+south':''} +datum=WGS84 +units=m +no_defs`,[lon,lat])
 }
 export function validateGeometry(points,type) {
- const polygon=['building','polygon'].includes(type)
+ const polygon=['building','polygon','auxiliary'].includes(type)
  if(!polygon) return
  const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
  const origin=points[0]
@@ -28,3 +28,4 @@ export function validateGeometry(points,type) {
   if((cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0)||on(a,b,c)||on(a,b,d)||on(c,d,a)||on(c,d,b)) throw Error('Los lados del polígono se cruzan.')
  }
 }
+

@@ -2,7 +2,7 @@ import React, {useRef, useState} from 'react'
 import {convertPoint, validateGeometry, toUTM} from './coordinates.js'
 import * as XLSX from 'xlsx'
 
-const labels={source:'Fuente puntual',receiver:'Receptor',barrier:'Barrera',building:'Edificio',road:'Fuente lineal / tráfico',polygon:'Área de cálculo',accessory:'Línea auxiliar'}
+const labels={source:'Fuente puntual',receiver:'Receptor',barrier:'Barrera',building:'Edificio',road:'Fuente lineal / tráfico',polygon:'Área de cálculo',accessory:'Línea auxiliar',auxiliary:'Polígono auxiliar'}
 export default function CoordinateEditor({initial, onClose, onPreview, onCommit}) {
  const [type,setType]=useState(initial?.type||'source'),[system,setSystem]=useState('wgs'),[zone,setZone]=useState(19),[hemisphere,setHemisphere]=useState('south')
  const panelRef=useRef(null), dragRef=useRef(null)
@@ -28,7 +28,7 @@ export default function CoordinateEditor({initial, onClose, onPreview, onCommit}
    if(type==='accessory'&&points.length!==2) throw Error('La línea auxiliar requiere un inicio y un término.')
    if(new Set(points.map(p=>p.join(','))).size!==points.length) throw Error('Hay vértices repetidos. No repita el vértice de cierre.')
    validateGeometry(points, type)
-   if(!['polygon','accessory'].includes(type)&&(height===''||!Number.isFinite(Number(height))||Number(height)<=0)) throw Error('La altura debe ser positiva.')
+   if(!['polygon','accessory','auxiliary'].includes(type)&&(height===''||!Number.isFinite(Number(height))||Number(height)<=0)) throw Error('La altura debe ser positiva.')
    if(ground!==''&&!Number.isFinite(Number(ground))) throw Error('Cota inválida.')
    return [{type,object:{...obj,name:name||labels[type],points,height_m:type==='accessory'?0:Number(height),ground_elevation_m:ground===''?null:Number(ground)}}]
  }
@@ -65,9 +65,10 @@ export default function CoordinateEditor({initial, onClose, onPreview, onCommit}
  <table><thead><tr><th>{type==='accessory'?'Extremo':'Vértice'}</th><th>{system==='wgs'?'Latitud':'Este (m)'}</th><th>{system==='wgs'?'Longitud':'Norte (m)'}</th>{type!=='accessory'&&<th>Orden</th>}</tr></thead><tbody>{rows.map((r,i)=><tr key={i}><td>{type==='accessory'?(i===0?'Inicio':'Término'):i+1}</td>{r.map((v,j)=><td key={j}><input aria-label={`V${i+1} ${j===0?'latitud o este':'longitud o norte'}`} type="number" step="any" value={v} onChange={e=>change(()=>setRows(rows.map((p,k)=>k===i?p.map((q,l)=>l===j?e.target.value:q):p)))}/></td>)}{type!=='accessory'&&<td><button aria-label={`Subir vértice ${i+1}`} disabled={!i} onClick={()=>change(()=>{const a=[...rows];[a[i-1],a[i]]=[a[i],a[i-1]];setRows(a)})}>↑</button><button aria-label={`Bajar vértice ${i+1}`} disabled={i===rows.length-1} onClick={()=>change(()=>{const a=[...rows];[a[i+1],a[i]]=[a[i],a[i+1]];setRows(a)})}>↓</button><button aria-label={`Eliminar vértice ${i+1}`} onClick={()=>change(()=>setRows(rows.filter((_,k)=>k!==i)))}>×</button></td>}</tr>)}</tbody></table>
  {type!=='accessory'&&<button onClick={()=>change(()=>setRows([...rows,['','']]))}>Agregar vértice</button>}
  </>}
- {!['polygon','accessory'].includes(type)&&<label>Altura sobre el terreno (m)<input type="number" step="any" value={height} onChange={e=>change(()=>setHeight(e.target.value))}/></label>}
+ {!['polygon','accessory','auxiliary'].includes(type)&&<label>Altura sobre el terreno (m)<input type="number" step="any" value={height} onChange={e=>change(()=>setHeight(e.target.value))}/></label>}
  {['source','receiver'].includes(type)&&<><label>Cota absoluta del terreno (m; vacío = topografía del proyecto)<input type="number" step="any" value={ground} onChange={e=>change(()=>setGround(e.target.value))}/></label>{!obj&&<details className="coord-import"><summary>Carga masiva desde archivo</summary><p>Agrega varias fuentes o receptores a la vez desde una planilla CSV o Excel. Cada fila representa un objeto. Para ingresar solo uno, usa los campos de arriba.</p><label>Seleccionar archivo CSV o Excel<input type="file" accept=".csv,.xlsx,.xls" onChange={e=>e.target.files[0]&&importFile(e.target.files[0])}/><small>Columnas: name, {system==='wgs'?'lat, lon':'easting, northing'}, height_m, ground_elevation_m, lw_db (fuentes). {batch&&`${batch.length} objetos listos.`}</small></label></details>}</>}
  {error&&<p role="alert">{error}</p>}
  </div><footer><button className="coord-secondary" onClick={()=>{onPreview(null);onClose()}}>Cancelar</button><button className="coord-preview" onClick={()=>{try{const items=build();onPreview(items);setReady(items);setError('')}catch(e){setError(e.message)}}}>Ubicar y previsualizar</button><button className="coord-confirm" disabled={!ready} onClick={()=>{onCommit(ready,initial);onPreview(null);onClose()}}>Confirmar</button></footer>
  </section></div>
 }
+

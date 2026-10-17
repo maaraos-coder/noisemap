@@ -3554,6 +3554,12 @@ function App() {
     const groups = {source:[],receiver:[],barrier:[],building:[],road:[],accessory:[]}
     items.forEach(({type,object:o}) => {
       if(type==='polygon') {setPolygon(o.points);return}
+      if(type==='auxiliary') {
+        const item={...o,id:o.id||crypto.randomUUID(),points:polygonPoints(o.points),color:o.color||'#2563eb',fillOpacity:o.fillOpacity??0.2,visible:o.visible!==false}
+        setAuxiliaryPolygons(prev=>[...prev.filter(p=>p.id!==item.id),item])
+        setSelected(null);setSelectedAuxiliaryId(item.id);setAuxiliaryDraft([])
+        return
+      }
       const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
       if(type==='source'||type==='receiver') {base.lat=o.points[0][0];base.lon=o.points[0][1];base.height_mode='specify';delete base.points}
       if(type==='accessory') {
@@ -3570,7 +3576,8 @@ function App() {
     })
     const first=Object.entries(groups).find(([,items])=>items.length)
     if(first) setSelected({type:first[0],id:first[1][0].id})
-    setDirty(true);setMode('navigate')
+    if(items.some(item=>item.type!=='auxiliary')) setDirty(true)
+    setMode('navigate')
   }
 
   const patchSelected = patch => {
@@ -4101,7 +4108,7 @@ function App() {
 
         <AuxiliaryPolygonLayer polygons={auxiliaryPolygons} draft={auxiliaryDraft}
           selectedId={mode==='navigate'?selectedAuxiliaryId:null} visible={layers.auxiliaryPolygons!==false}
-          onSelect={id=>{setSelectedAuxiliaryId(id);setSelected(null)}} onUpdate={patchAuxiliary}/>
+          onSelect={id=>{setSelectedAuxiliaryId(id);setSelected(null)}} onUpdate={patchAuxiliary} onDraftUpdate={(index,point)=>setAuxiliaryDraft(prev=>prev.map((p,i)=>i===index?point:p))}/>
 
         {layers.accessories && (
           <Source id="accessories" type="geojson" data={accessoryData}>
@@ -4555,7 +4562,7 @@ function App() {
             <div className="building-edit-vertex" title={`Vértice ${index + 1}`}>{index + 1}</div>
           </Marker>
         ))}
-        {coordinatePreview && <Source id="coordinate-preview" type="geojson" data={{type:'FeatureCollection',features:coordinatePreview.map(({type,object:o})=>({type:'Feature',properties:{},geometry:o.points.length===1?{type:'Point',coordinates:[o.points[0][1],o.points[0][0]]}:['polygon','building'].includes(type)?{type:'Polygon',coordinates:[[...o.points,o.points[0]].map(([lat,lon])=>[lon,lat])]}:{type:'LineString',coordinates:o.points.map(([lat,lon])=>[lon,lat])}}))}}>
+        {coordinatePreview && <Source id="coordinate-preview" type="geojson" data={{type:'FeatureCollection',features:coordinatePreview.map(({type,object:o})=>({type:'Feature',properties:{},geometry:o.points.length===1?{type:'Point',coordinates:[o.points[0][1],o.points[0][0]]}:['polygon','building','auxiliary'].includes(type)?{type:'Polygon',coordinates:[[...o.points,o.points[0]].map(([lat,lon])=>[lon,lat])]}:{type:'LineString',coordinates:o.points.map(([lat,lon])=>[lon,lat])}}))}}>
           <Layer id="coordinate-preview-point" type="circle" filter={['==',['geometry-type'],'Point']} paint={{'circle-radius':9,'circle-color':'#00bcd4','circle-stroke-width':3,'circle-stroke-color':'#fff'}}/>
           <Layer id="coordinate-preview-line" type="line" filter={['!=',['geometry-type'],'Point']} paint={{'line-width':4,'line-color':'#00bcd4','line-dasharray':[2,1]}}/>
         </Source>}
@@ -4578,7 +4585,7 @@ function App() {
 
       <div className="object-toolbar">
         <div className="object-toolbar-title">Agregar objetos · Ubicar en el mapa</div>
-        <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor({type:['source','receiver','barrier','building','road','polygon','line'].includes(mode)?(mode==='line'?'accessory':mode):'source'})}}>Ingresar coordenadas</button>
+        <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor(selectedAuxiliaryId?{type:'auxiliary',object:auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)}:{type:mode==='auxiliary-polygon'?'auxiliary':['source','receiver','barrier','building','road','polygon','line'].includes(mode)?(mode==='line'?'accessory':mode):'source'})}}>Ingresar coordenadas</button>
         {selectedObject && ['source','receiver','barrier','building','road','accessory'].includes(selected?.type) && <button onClick={()=>setCoordinateEditor({type:selected.type,object:selectedObject})}>Editar coordenadas · {selectedObject.name}</button>}
         {polygon.length>=3 && <button onClick={()=>setCoordinateEditor({type:'polygon',object:{name:'Área de cálculo',points:polygon}})}>Editar coordenadas del área</button>}
         <div className="object-toolbar-actions">
@@ -6948,10 +6955,11 @@ function App() {
         <div className="status-pill">Arrastra los vértices azules para editar el área de cálculo</div>
       )}
 
-      {mode==='auxiliary-polygon' && <div className="status-pill">Polígono auxiliar · {auxiliaryDraft.length} vértices · pulsa “Cerrar polígono” al terminar</div>}
+      {mode==='auxiliary-polygon' && <div className="status-pill">Polígono auxiliar · {auxiliaryDraft.length} vértices · arrastra los puntos para ajustarlos · pulsa “Cerrar polígono” al terminar</div>}
       {auxiliaryNotice && <div className="auxiliary-notice" role="alert">{auxiliaryNotice}<button type="button" onClick={()=>setAuxiliaryNotice('')}>×</button></div>}
       {selectedAuxiliaryId && mode==='navigate' && auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId) && <AuxiliaryPolygonPanel
         key={selectedAuxiliaryId} polygon={auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)}
+        onEditCoordinates={()=>setCoordinateEditor({type:'auxiliary',object:auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)})}
         onChange={patch=>patchAuxiliary(selectedAuxiliaryId,patch)} onClose={()=>setSelectedAuxiliaryId(null)}
         onDelete={()=>{setAuxiliaryPolygons(prev=>prev.filter(p=>p.id!==selectedAuxiliaryId));setSelectedAuxiliaryId(null)}}/>}
 
