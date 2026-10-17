@@ -6968,7 +6968,7 @@ function App() {
 
       {mode==='auxiliary-polygon' && <div className="status-pill">Polígono auxiliar · {auxiliaryDraft.length} vértices · arrastra los puntos para ajustarlos · pulsa “Cerrar polígono” al terminar</div>}
       {auxiliaryNotice && <div className="auxiliary-notice" role="alert">{auxiliaryNotice}<button type="button" onClick={()=>setAuxiliaryNotice('')}>×</button></div>}
-      {selectedAuxiliaryId && mode==='navigate' && auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId) && <AuxiliaryPolygonPanel
+      {!coordinateEditor && selectedAuxiliaryId && mode==='navigate' && auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId) && <AuxiliaryPolygonPanel
         key={selectedAuxiliaryId} polygon={auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)}
         onEditCoordinates={()=>setCoordinateEditor({type:'auxiliary',object:auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)})}
         onChange={patch=>patchAuxiliary(selectedAuxiliaryId,patch)} onClose={()=>setSelectedAuxiliaryId(null)}

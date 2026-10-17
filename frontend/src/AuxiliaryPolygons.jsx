@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Layer, Marker, Source } from 'react-map-gl/maplibre'
-import { auxiliaryGeoJSON, polygonPoints } from './auxiliaryPolygons'
+import { auxiliaryGeoJSON } from './auxiliaryPolygons'
 
 export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, onUpdate, onDraftUpdate, visible }) {
   const selected=visible ? polygons.find(p=>p.id===selectedId && p.visible!==false) : null
@@ -27,8 +27,6 @@ export function AuxiliaryPolygonLayer({ polygons, draft, selectedId, onSelect, o
 }
 
 export function AuxiliaryPolygonPanel({ polygon, onChange, onClose, onDelete, onEditCoordinates }) {
-  const [vertices,setVertices]=useState(polygon.points.map(p=>p.join(', ')).join('\n'))
-  const [error,setError]=useState('')
   const panelRef=useRef(null), dragRef=useRef(null)
   const [position,setPosition]=useState(null)
   function startDrag(e) {
@@ -42,7 +40,6 @@ export function AuxiliaryPolygonPanel({ polygon, onChange, onClose, onDelete, on
     const rect=panelRef.current.getBoundingClientRect()
     setPosition({x:Math.max(8,Math.min(window.innerWidth-rect.width-8,e.clientX-dragRef.current.dx)),y:Math.max(8,Math.min(window.innerHeight-rect.height-8,e.clientY-dragRef.current.dy))})
   }
-  useEffect(()=>setVertices(polygon.points.map(p=>p.join(', ')).join('\n')),[polygon.points])
   return <div className="coord-backdrop"><section ref={panelRef} className="coord-panel auxiliary-polygon-panel" role="dialog" aria-modal="false" aria-label="Editar polígono auxiliar" style={position?{left:position.x,top:position.y,right:'auto'}:undefined}>
     <header className="coord-header" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={()=>{dragRef.current=null}} onPointerCancel={()=>{dragRef.current=null}}><div className="object-drag-handle">⋮⋮ Mover ficha</div><button type="button" onClick={onClose} aria-label="Cerrar polígono auxiliar">×</button></header><div className="coord-body"><div className="object-type">REFERENCIA VISUAL</div><h2>Polígono auxiliar</h2>
     <p>Referencia visual del predio o de otra zona. No actúa como edificio, barrera ni área de cálculo.</p>
@@ -50,11 +47,8 @@ export function AuxiliaryPolygonPanel({ polygon, onChange, onClose, onDelete, on
     <label>Color<input type="color" value={polygon.color} onChange={e=>onChange({color:e.target.value})}/></label>
     <label>Opacidad del relleno · {Math.round(polygon.fillOpacity*100)} %<input type="range" min="0" max="100" value={Math.round(polygon.fillOpacity*100)} onChange={e=>onChange({fillOpacity:Number(e.target.value)/100})}/></label>
     <label className="auxiliary-visibility"><input type="checkbox" checked={polygon.visible!==false} onChange={e=>onChange({visible:e.target.checked})}/> Mostrar polígono</label>
-    <button type="button" onClick={onEditCoordinates}>Editar coordenadas · WGS84 / UTM</button>
-    <p>Arrastra sus vértices en el mapa. Para agregar o quitar vértices, modifica la lista de coordenadas.</p>
-    <label>Vértices · una pareja latitud, longitud por línea<textarea rows="5" value={vertices} onChange={e=>setVertices(e.target.value)} /></label>
-    <button type="button" onClick={()=>{try { const points=polygonPoints(vertices.trim().split(/\n+/).map(line=>line.split(',').map(v=>v.trim())));onChange({points});setError('') } catch(e) {setError(e.message)}}}>Aplicar vértices</button>
-    {error && <p role="alert">{error}</p>}
+    <button type="button" onClick={onEditCoordinates}>Editar coordenadas</button>
+    <p>Arrastra los vértices en el mapa o abre el editor para agregar, quitar y ordenar puntos. En el editor elige WGS84 (latitud/longitud) o UTM (Este/Norte, zona y hemisferio).</p>
     <button type="button" onClick={onDelete}>Eliminar este polígono</button>
   </div></section></div>
 }
