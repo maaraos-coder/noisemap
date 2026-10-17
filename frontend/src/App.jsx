@@ -1295,6 +1295,17 @@ function App() {
   const [buildingFacadeIndex, setBuildingFacadeIndex] = useState(0)
   const [roads, setRoads] = useState([])
   const [roadDraft, setRoadDraft] = useState([])
+  // Keep floating menus above the actual toolbar, including wrapped/zoomed layouts.
+  useEffect(() => {
+    const toolbar=document.querySelector('.object-toolbar')
+    if(!toolbar) return
+    const update=()=>document.documentElement.style.setProperty('--map-bottom-clearance',`${Math.max(16,window.innerHeight-toolbar.getBoundingClientRect().top+12)}px`)
+    const observer=new ResizeObserver(update)
+    observer.observe(toolbar)
+    window.addEventListener('resize',update)
+    update()
+    return ()=>{observer.disconnect();window.removeEventListener('resize',update);document.documentElement.style.removeProperty('--map-bottom-clearance')}
+  }, [])
   const [auxiliaryPolygons, setAuxiliaryPolygons] = useState([])
   const [auxiliaryDraft, setAuxiliaryDraft] = useState([])
   const [selectedAuxiliaryId, setSelectedAuxiliaryId] = useState(null)
@@ -4969,7 +4980,7 @@ function App() {
 
       {layersOpen && (
         <div className="layers-popover">
-          <div className="popover-title">Capas</div>
+          <div className="popover-title layers-title"><span>Capas</span><button type="button" aria-label="Cerrar capas" onClick={()=>setLayersOpen(false)}>×</button></div>
 
           <div className="basemap-section">
             <span className="basemap-section-title">MAPA BASE</span>
@@ -4998,7 +5009,7 @@ function App() {
             <input aria-label="Opacidad del mapa de ruido" type="range" min="0" max="100" value={Math.round(noiseOpacity*100)} onChange={e=>setNoiseOpacity(Number(e.target.value)/100)}/>
             <small>0 % permite ver el mapa base; 100 % muestra la capa de ruido opaca. No cambia los niveles calculados.</small>
           </label>
-          {auxiliaryPolygons.map(item=><button type="button" key={item.id} className="auxiliary-list-item" onClick={()=>{setSelectedAuxiliaryId(item.id);setSelected(null);setMode('navigate')}}>{item.name || 'Polígono auxiliar'} · Editar</button>)}
+          {auxiliaryPolygons.map(item=><button type="button" key={item.id} className="auxiliary-list-item" onClick={()=>{setSelectedAuxiliaryId(item.id);setSelected(null);setLayersOpen(false);setMode('navigate')}}>{item.name || 'Polígono auxiliar'} · Editar</button>)}
           {[
             ['raster', 'Mapa de ruido'],
             ['sources', 'Fuentes'],

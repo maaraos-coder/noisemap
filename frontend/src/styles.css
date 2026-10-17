@@ -4827,3 +4827,21 @@ select {
 .auxiliary-polygon-panel .coord-body .auxiliary-visibility{display:flex;align-items:center;gap:8px}
 .auxiliary-polygon-panel .auxiliary-visibility input{width:auto;margin:0}
 .auxiliary-polygon-panel .coord-body button{padding:8px 10px;background:#eef6fe;color:#17466b;border:1px solid #bdcfe0;border-radius:6px;cursor:pointer;margin:4px 6px 4px 0}
+
+/* Keep floating menus within the free map area above the bottom toolbar. */
+.layers-popover {
+  --popover-top:112px;
+  top:var(--popover-top) !important;
+  max-height:max(72px,calc(100dvh - var(--popover-top) - var(--map-bottom-clearance,170px)));
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+  box-sizing:border-box;
+  z-index:110;
+}
+.layers-title {display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:-12px;background:#fff;z-index:1;padding:6px 0}
+.layers-title button {border:0;background:transparent;color:#65717d;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
+.noise-opacity-control {display:flex;flex-direction:column;gap:6px;margin:12px 0;font-size:12px;line-height:1.45}
+.noise-opacity-control small {font-size:11px;line-height:1.45;color:#526b80}
+.auxiliary-list-item {font:inherit;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:900px){.layers-popover{--popover-top:92px}}
