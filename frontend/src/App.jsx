@@ -1,4 +1,6 @@
 import CoordinateEditor from './CoordinateEditor'
+import { AuxiliaryPolygonLayer, AuxiliaryPolygonPanel } from './AuxiliaryPolygons'
+import { polygonPoints, restoreVisuals } from './auxiliaryPolygons'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre'
 
@@ -653,7 +655,7 @@ function rasterDataUrl(levels, vmin, vmax, bounds = null, barriers = []) {
       image.data[index] = r
       image.data[index + 1] = g
       image.data[index + 2] = b
-      image.data[index + 3] = 178
+      image.data[index + 3] = 255
     }
   }
 
@@ -1293,6 +1295,11 @@ function App() {
   const [buildingFacadeIndex, setBuildingFacadeIndex] = useState(0)
   const [roads, setRoads] = useState([])
   const [roadDraft, setRoadDraft] = useState([])
+  const [auxiliaryPolygons, setAuxiliaryPolygons] = useState([])
+  const [auxiliaryDraft, setAuxiliaryDraft] = useState([])
+  const [selectedAuxiliaryId, setSelectedAuxiliaryId] = useState(null)
+  const [auxiliaryNotice, setAuxiliaryNotice] = useState('')
+  const [noiseOpacity, setNoiseOpacity] = useState(0.64)
   const [accessories, setAccessories] = useState([])
   const [contours, setContours] = useState([])
   const [contourDraft, setContourDraft] = useState([])
@@ -1360,6 +1367,7 @@ function App() {
   const [receiverPreviewError, setReceiverPreviewError] = useState('')
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
+  useEffect(() => { if (selected) setSelectedAuxiliaryId(null) }, [selected])
   const [controlEditorOpen, setControlEditorOpen] = useState(false)
   const [treatmentTab, setTreatmentTab] = useState('geometry')
   const [sourceCardPos, setSourceCardPos] = useState(null)
@@ -1382,6 +1390,7 @@ function App() {
     barriers: true,
     buildings: true,
     roads: true,
+    auxiliaryPolygons: true,
     accessories: true,
     contours: true,
     rays: true,
@@ -1633,6 +1642,15 @@ function App() {
 
   const onMapClick = event => {
     const { lat, lng } = event.lngLat
+    if (mode === 'auxiliary-polygon') {
+      setAuxiliaryDraft(prev => [...prev, [lat, lng]])
+      return
+    }
+    if (mode === 'navigate') {
+      const hit=event.features?.find(feature=>feature.layer.id.startsWith('auxiliary-polygons-'))
+      setSelectedAuxiliaryId(hit?.properties?.id || null)
+      if (hit) {setSelected(null); return}
+    }
 
     if (mode === 'cut') {
       if (!cutStart) {
@@ -1959,6 +1977,8 @@ function App() {
         buildings,
         roads,
         accessories,
+        auxiliaryPolygons,
+        noiseOpacity,
         contours,
         polygon,
         rayMode,
@@ -1997,6 +2017,12 @@ function App() {
         throw new Error('El proyecto está incompleto o dañado.')
       }
 
+      const visual=restoreVisuals(data)
+      setAuxiliaryPolygons(visual.polygons)
+      setNoiseOpacity(visual.noiseOpacity)
+      setAuxiliaryDraft([])
+      setSelectedAuxiliaryId(null)
+      setAuxiliaryNotice('')
       setSources(data.sources)
       setReceivers(data.receivers)
       setBarriers(Array.isArray(data.barriers) ? data.barriers : [])
@@ -2384,6 +2410,22 @@ function App() {
     setReceivers(prev => [...prev, ...newReceivers])
   }
 
+  const patchAuxiliary = (id, patch) => {
+    try {
+      const clean=patch.points ? {...patch,points:polygonPoints(patch.points)} : patch
+      setAuxiliaryPolygons(prev=>prev.map(item=>item.id===id?{...item,...clean}:item))
+      setAuxiliaryNotice('')
+    } catch (error) {setAuxiliaryNotice(error.message)}
+  }
+  const finishAuxiliary = () => {
+    try {
+      const points=polygonPoints(auxiliaryDraft)
+      const id=crypto.randomUUID()
+      setAuxiliaryPolygons(prev=>[...prev,{id,name:`Polígono auxiliar ${prev.length+1}`,points,color:'#2563eb',fillOpacity:0.2,visible:true}])
+      setAuxiliaryDraft([]);setSelectedAuxiliaryId(id);setSelected(null);setMode('navigate');setAuxiliaryNotice('')
+    } catch (error) {setAuxiliaryNotice(error.message)}
+  }
+
   const finishArea = () => {
     if (draftPolygon.length >= 3) {
       setPolygon(draftPolygon)
@@ -2393,6 +2435,8 @@ function App() {
   }
 
   const cancelDrawing = () => {
+    setAuxiliaryDraft([])
+    setAuxiliaryNotice('')
     setDraftPolygon([])
     setBuildingDraft([])
     setContourDraft([])
@@ -2596,6 +2640,9 @@ function App() {
       setBarriers([])
       setBuildings([])
       setRoads([])
+      setAuxiliaryPolygons([])
+      setAuxiliaryDraft([])
+      setSelectedAuxiliaryId(null)
       setAccessories(preset.accessories || [])
       setContours([])
       setPolygon([])
@@ -3618,8 +3665,10 @@ function App() {
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)
 
       if (event.key === 'Escape') {
-        if (barrierStart || lineStart || draftPolygon.length || buildingDraft.length || contourDraft.length || roadDraft.length || (mode === 'cut' && cutStart)) {
+        if (auxiliaryDraft.length || barrierStart || lineStart || draftPolygon.length || buildingDraft.length || contourDraft.length || roadDraft.length || (mode === 'cut' && cutStart)) {
           cancelDrawing()
+        } else if (selectedAuxiliaryId) {
+          setSelectedAuxiliaryId(null)
         } else if (selected) {
           setSelected(null)
         }
@@ -3640,7 +3689,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selected, barrierStart, lineStart, draftPolygon, buildingDraft, contourDraft, roadDraft, mode, polygon, cutStart])
+  }, [selected, selectedAuxiliaryId, auxiliaryDraft, barrierStart, lineStart, draftPolygon, buildingDraft, contourDraft, roadDraft, mode, polygon, cutStart])
 
   const imageCoordinates = result?.bounds
     ? [
@@ -3671,7 +3720,8 @@ function App() {
         onMouseMove={onMapMouseMove}
         onMove={event => setMapZoom(Number(event.viewState?.zoom ?? event.target?.getZoom?.() ?? mapZoom))}
         cursor={mode === 'navigate' ? 'grab' : mode === 'edit-area' ? 'default' : 'crosshair'}
-        doubleClickZoom={mode !== 'area'}
+        interactiveLayerIds={['auxiliary-polygons-fill','auxiliary-polygons-line']}
+        doubleClickZoom={mode !== 'area' && mode !== 'auxiliary-polygon'}
       >
         <NavigationControl position="bottom-left" />
 
@@ -3686,7 +3736,7 @@ function App() {
               id="noise-raster-layer"
               type="raster"
               paint={{
-                'raster-opacity': 0.92,
+                'raster-opacity': noiseOpacity,
                 'raster-resampling': 'linear',
                 'raster-fade-duration': 0
               }}
@@ -3706,7 +3756,7 @@ function App() {
               }}
               paint={{
                 'line-color': ['get', 'line_color'],
-                'line-opacity': 1,
+                'line-opacity': noiseOpacity,
                 'line-width': [
                   'case',
                   ['==', ['get', 'major'], 1],
@@ -4048,6 +4098,10 @@ function App() {
             </div>
           </Marker>
         )}
+
+        <AuxiliaryPolygonLayer polygons={auxiliaryPolygons} draft={auxiliaryDraft}
+          selectedId={mode==='navigate'?selectedAuxiliaryId:null} visible={layers.auxiliaryPolygons!==false}
+          onSelect={id=>{setSelectedAuxiliaryId(id);setSelected(null)}} onUpdate={patchAuxiliary}/>
 
         {layers.accessories && (
           <Source id="accessories" type="geojson" data={accessoryData}>
@@ -4545,6 +4599,8 @@ function App() {
             setLineHover(null)
             setMode('line')
           }} />
+          <IconButton active={mode === 'auxiliary-polygon'} title="Dibujar un polígono de referencia visual sin efecto acústico" icon="⬡" label="Polígono auxiliar" onClick={()=>{cancelDrawing();setSelected(null);setSelectedAuxiliaryId(null);setMode('auxiliary-polygon')}} />
+          {mode==='auxiliary-polygon' && auxiliaryDraft.length>=3 && <button type="button" className="bottom-context-action finish" onClick={finishAuxiliary}>✓ Cerrar polígono</button>}
           <IconButton active={mode === 'contour'} title="Dibujar curva de nivel y asignar cota" icon="≋" label="Curva nivel" onClick={() => {
             setContourDraft([])
             setMode('contour')
@@ -4625,7 +4681,7 @@ function App() {
             </button>
           )}
 
-          {(mode === 'road' || mode === 'contour' || mode === 'building' || mode === 'area' || mode === 'cut' || barrierStart || lineStart) && (
+          {(mode === 'auxiliary-polygon' || mode === 'road' || mode === 'contour' || mode === 'building' || mode === 'area' || mode === 'cut' || barrierStart || lineStart) && (
             <button
               type="button"
               className="bottom-context-action cancel"
@@ -4931,6 +4987,11 @@ function App() {
           </div>
 
           <div className="basemap-divider" />
+          <label className="noise-opacity-control">Opacidad del mapa de ruido · {Math.round(noiseOpacity*100)} %
+            <input aria-label="Opacidad del mapa de ruido" type="range" min="0" max="100" value={Math.round(noiseOpacity*100)} onChange={e=>setNoiseOpacity(Number(e.target.value)/100)}/>
+            <small>0 % permite ver el mapa base; 100 % muestra la capa de ruido opaca. No cambia los niveles calculados.</small>
+          </label>
+          {auxiliaryPolygons.map(item=><button type="button" key={item.id} className="auxiliary-list-item" onClick={()=>{setSelectedAuxiliaryId(item.id);setSelected(null);setMode('navigate')}}>{item.name || 'Polígono auxiliar'} · Editar</button>)}
           {[
             ['raster', 'Mapa de ruido'],
             ['sources', 'Fuentes'],
@@ -4938,6 +4999,7 @@ function App() {
             ['barriers', 'Barreras'],
             ['buildings', 'Edificios'],
             ['roads', 'Tráfico vial'],
+            ['auxiliaryPolygons', 'Polígonos auxiliares'],
             ['accessories', 'Líneas auxiliares'],
             ['contours', 'Curvas de nivel'],
             ['rays', 'Rayos fuente–receptor'],
@@ -4946,7 +5008,7 @@ function App() {
             <label key={key} className="layer-row">
               <input
                 type="checkbox"
-                checked={layers[key]}
+                checked={layers[key] !== false}
                 onChange={() => setLayers(prev => ({ ...prev, [key]: !prev[key] }))}
               />
               <span>{label}</span>
@@ -6886,6 +6948,13 @@ function App() {
         <div className="status-pill">Arrastra los vértices azules para editar el área de cálculo</div>
       )}
 
+      {mode==='auxiliary-polygon' && <div className="status-pill">Polígono auxiliar · {auxiliaryDraft.length} vértices · pulsa “Cerrar polígono” al terminar</div>}
+      {auxiliaryNotice && <div className="auxiliary-notice" role="alert">{auxiliaryNotice}<button type="button" onClick={()=>setAuxiliaryNotice('')}>×</button></div>}
+      {selectedAuxiliaryId && mode==='navigate' && auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId) && <AuxiliaryPolygonPanel
+        key={selectedAuxiliaryId} polygon={auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)}
+        onChange={patch=>patchAuxiliary(selectedAuxiliaryId,patch)} onClose={()=>setSelectedAuxiliaryId(null)}
+        onDelete={()=>{setAuxiliaryPolygons(prev=>prev.filter(p=>p.id!==selectedAuxiliaryId));setSelectedAuxiliaryId(null)}}/>}
+
       <footer className="map-footer">
         Emisión vial CNOSSOS-EU + motor de propagación exterior educativo · no constituye una cadena normativa CNOSSOS completa
       </footer>
@@ -6894,3 +6963,4 @@ function App() {
 }
 
 export default App
+

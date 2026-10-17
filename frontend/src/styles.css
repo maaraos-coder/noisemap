@@ -4811,3 +4811,18 @@ select {
 @media(max-width:600px){.coord-panel{top:72px;right:8px;max-height:calc(100dvh - 88px)}.coord-point-fields{grid-template-columns:1fr}.coord-panel footer{justify-content:flex-start}}
 
 .object-toolbar>button{border:1px solid #bacbd2;border-radius:7px;background:#fff;padding:7px 10px;cursor:pointer;font-size:12px}.object-toolbar>.coordinate-tool{background:#e6f5f7;color:#07556b;font-weight:700}
+
+/* Visual annotations remain separate from acoustic objects. */
+.auxiliary-polygon-panel { position:absolute;top:125px;right:18px;z-index:8;width:min(350px,calc(100vw - 36px));max-height:calc(100vh - 270px);overflow:auto;background:#fff;border:1px solid #c8d9e8;border-radius:14px;padding:16px;box-shadow:0 8px 28px #173b5333;color:#173b53; }
+.auxiliary-polygon-panel header { display:flex;justify-content:space-between;align-items:center;gap:12px; }
+.auxiliary-polygon-panel h3 { margin:0;font-size:16px; }
+.auxiliary-polygon-panel p,.noise-opacity-control small { font-size:12px;line-height:1.5;color:#526b80; }
+.auxiliary-polygon-panel label,.noise-opacity-control { display:flex;flex-direction:column;gap:6px;margin:12px 0;font-size:13px; }
+.auxiliary-polygon-panel input:not([type=checkbox]),.auxiliary-polygon-panel textarea { width:100%;box-sizing:border-box; }
+.auxiliary-polygon-panel input:not([type=range]):not([type=color]):not([type=checkbox]),.auxiliary-polygon-panel textarea { padding:8px;border:1px solid #b9cedd;border-radius:6px; }
+.auxiliary-polygon-panel button,.auxiliary-list-item { padding:8px 10px;background:#eef6fe;color:#17466b;border:1px solid #bdcfe0;border-radius:6px;cursor:pointer;margin:4px 0; }
+.auxiliary-list-item { display:block;width:100%;text-align:left; }
+.noise-opacity-control input { width:100%; }
+.auxiliary-vertex { display:block;border:2px solid #fff;border-radius:50%;background:#2563eb;color:#fff;min-width:23px;height:23px;padding:0;text-align:center;font-size:11px;cursor:grab;box-shadow:0 1px 5px #0008; }
+.auxiliary-notice { position:absolute;top:88px;left:50%;transform:translateX(-50%);z-index:15;max-width:85vw;background:#fff4d6;color:#6e4a00;padding:10px 14px;border-radius:9px; }
+.auxiliary-notice button { margin-left:12px; }
