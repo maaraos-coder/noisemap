@@ -1,0 +1,17 @@
+# Local secure CNOSSOS propagation test engine; not exposed to public network.
+# Requires .env with DB_ENCRYPTION_SECRET set to a random, non-committed value.
+services:
+  cnossos:
+    image: ghcr.io/universite-gustave-eiffel/noisemodelling:main
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8008:8000"
+    environment:
+      JAVA_OPTS: "-Xms256m -Xmx1536m"
+      ROOT_URL: ""
+      DB_ENCRYPTION_SECRET: "${DB_ENCRYPTION_SECRET:?Define a secret in your local .env}"
+    volumes:
+      - cnossos-workspace:/srv/noisemodelling/workspace
+    mem_limit: 2g
+volumes:
+  cnossos-workspace:
