@@ -1,0 +1,24 @@
+name: Road CNOSSOS regression
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "noise_app/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/road-cnossos.yml"
+  workflow_dispatch:
+
+jobs:
+  road-acoustics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest tests/test_road_scenario.py tests/test_cnossos_education.py -q
+      - run: python -m compileall -q app.py noise_app/
