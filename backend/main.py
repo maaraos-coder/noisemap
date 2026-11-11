@@ -21,6 +21,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from noise_app.cnossos_adapter import line_emission_cnossos, SURFACES
+from noise_app.facade_audit import facade_geometry_audit
 from noise_app.noisemodelling_export import package_scenario
 from noise_app.engine import (
     Barrier,
@@ -1152,7 +1153,31 @@ class BarrierProfileRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
+class FacadeAuditRequest(BaseModel):
+    road: RoadIn
+    building: BuildingIn
+    receiver: ReceiverIn
+
+
+@app.post("/api/facade-audit")
+def facade_audit(payload: FacadeAuditRequest):
+    if not payload.road.enabled or not payload.building.enabled:
+        raise HTTPException(status_code=422, detail="La calle y el edificio deben estar activos.")
+    try:
+        result = facade_geometry_audit(
+            payload.road.points, payload.building.points,
+            payload.receiver.lat, payload.receiver.lon, payload.receiver.height_m
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**result, "road_id":payload.road.id,
+            "building_id":payload.building.id, "receiver_id":payload.receiver.id}
+
+
 class ReceiverPreviewRequest(BaseModel):
+    # Exclude solely the own facade's reflection in a receptor calculation.
+    facade_exclude_building_id: Optional[str] = None
+    facade_exclude_edge_index: Optional[int] = Field(default=None, ge=1)
     sources: List[SourceIn] = []
     roads: List[RoadIn] = []
     receiver: ReceiverIn
@@ -2239,7 +2264,6 @@ def acoustic_cut(payload: AcousticCutRequest):
         lat0,
         lon0,
     )
-
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
         frequency_hz=payload.settings.frequency_hz,
@@ -2360,6 +2384,39 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         lat0,
         lon0,
     )
+
+    # Disable ONLY the reflection of the selected receiver-facing facade.
+    # Keep the wall's screening/diffraction geometry and other building
+    # reflections unchanged. This is not a generic -3 dB correction.
+    if payload.facade_exclude_building_id is not None:
+        target_building = next((b for b in payload.buildings
+                                if b.id == payload.facade_exclude_building_id and b.enabled), None)
+        if target_building is None:
+            raise HTTPException(status_code=422, detail="Edificio de fachada no encontrado.")
+        audit = facade_geometry_audit(
+            payload.roads[0].points if payload.roads else [],
+            target_building.points, payload.receiver.lat,
+            payload.receiver.lon, payload.receiver.height_m
+        )
+        if payload.facade_exclude_edge_index != audit["facade_edge_index"]:
+            raise HTTPException(status_code=422, detail="La fachada seleccionada no coincide con la geometría del receptor.")
+        if not audit["valid_for_incident_facade_demo"]:
+            raise HTTPException(status_code=422, detail="Receptor exterior no válido para incidencia de fachada: " + "; ".join(audit["warnings"]))
+        facade_name = f"{target_building.name} · fachada {payload.facade_exclude_edge_index}"
+        target_a = target_building.points[payload.facade_exclude_edge_index - 1]
+        target_b = target_building.points[
+            payload.facade_exclude_edge_index % len(target_building.points)
+        ]
+        def is_own_wall(item):
+            return (
+                item.name == facade_name
+                and abs(item.lat_a - float(target_a[0])) < 1e-8
+                and abs(item.lon_a - float(target_a[1])) < 1e-8
+                and abs(item.lat_b - float(target_b[0])) < 1e-8
+                and abs(item.lon_b - float(target_b[1])) < 1e-8
+            )
+        barriers = [replace(item, reflection_percent=0.0) if is_own_wall(item)
+                    else item for item in barriers]
 
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,

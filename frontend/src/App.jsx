@@ -1359,7 +1359,6 @@ function App() {
     limit_distance: true,
     convex_path: true,
     reflection_order: 'first',
-    facade_1m: true,
     reflector_size_check: true
   })
 
@@ -1380,6 +1379,8 @@ function App() {
   const [roadLdenLoading, setRoadLdenLoading] = useState(false)
   const [roadLdenError, setRoadLdenError] = useState('')
   const [roadLdenReceiverId, setRoadLdenReceiverId] = useState('')
+  const [roadLdenBuildingId, setRoadLdenBuildingId] = useState('')
+  const [roadFacadeAudit, setRoadFacadeAudit] = useState(null)
   const [roadEmissionResult, setRoadEmissionResult] = useState(null)
   const [roadEmissionLoading, setRoadEmissionLoading] = useState(false)
   const [noisemodellingExportLoading, setNoisemodellingExportLoading] = useState(false)
@@ -3698,6 +3699,13 @@ function App() {
     setRoadLdenLoading(true)
     setRoadLdenResult(null)
     setRoadLdenError('')
+    setRoadFacadeAudit(null)
+    const building = buildings.find(item=>item.id===roadLdenBuildingId && item.enabled) || buildings.find(item=>item.enabled && item.points?.length>=3)
+    if (!building) {
+      setRoadLdenLoading(false)
+      setRoadLdenError('Dibuja el edificio y selecciona su polígono antes de estimar Lden incidente en fachada.')
+      return
+    }
     const periods = {
       day: {hours:12, penalty:0},
       evening: {hours:4, penalty:5},
@@ -3709,6 +3717,16 @@ function App() {
       night: {light:10, medium:0, heavy:0, moped:0, motorcycle:0}
     }
     try {
+      const auditResponse = await fetch(`${API_BASE}/api/facade-audit`, {
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({road:selectedObject,building,receiver})
+      })
+      const audit = await auditResponse.json()
+      if (!auditResponse.ok) throw new Error(audit.detail || 'Error en la auditoría geométrica.')
+      setRoadFacadeAudit(audit)
+      if (!audit.valid_for_incident_facade_demo) {
+        throw new Error('Ubicación de fachada inválida: ' + (audit.warnings||[]).join(' '))
+      }
       const entries = {}
       for (const period of Object.keys(periods)) {
         const traffic = flows[period] || {}
@@ -3727,6 +3745,8 @@ function App() {
             sources: [],
             roads: [road],
             receiver,
+            facade_exclude_building_id: building.id,
+            facade_exclude_edge_index: audit.facade_edge_index,
             barriers,
             buildings,
             contours,
@@ -3764,6 +3784,11 @@ function App() {
         road_points:selectedObject.points,
         receiver_id:receiver.id, receiver_name:receiver.name,
         receiver_location:{lat:receiver.lat,lon:receiver.lon,height_m:receiver.height_m},
+        facade_building_id:building.id,
+        facade_building_name:building.name,
+        facade_geometry_audit:audit,
+        incident_sound:true,
+        facade_reflection_handling:'Excluida reflexión del muro receptor; se conservan demás fachadas. Sin resta fija de 3 dB.',
         hourly_traffic:flows,
         road_emission_settings:{
           surface:selectedObject.road_surface || 'reference road surface',
@@ -5776,11 +5801,7 @@ function App() {
                 <option value="first">Primer orden</option>
               </select>
             </label>
-            <label className="check-row">
-              <input type="checkbox" checked={globalSettings.facade_1m}
-                onChange={e => setGlobalSettings(s => ({ ...s, facade_1m: e.target.checked }))} />
-              Fachada a 1 m
-            </label>
+            <div className="future-note">La reflexión de la propia fachada se excluye únicamente en el cálculo Lden incidente del editor de vías, tras comprobar geométricamente el receptor. No se mueve automáticamente el receptor 1 m.</div>
             <div className="future-note">Activo en el motor: reflexión especular de primer orden mediante fuente imagen, descartando trayectorias reflejadas bloqueadas por otros obstáculos. La reflectividad se define en cada barrera.</div>
           </div>
 
@@ -6573,18 +6594,39 @@ function App() {
                   </div>
                 </div>
               ))}
+              <h4 className="subheading">Auditoría del receptor en fachada</h4>
+              <p className="road-lden-help">
+                Lden incidente sin reflexión de la fachada propia: no se resta automáticamente 3 dB.
+                Sitúa el receptor a unos 0,1 m de la fachada, del lado de la calle,
+                a la altura exterior de la vivienda.
+              </p>
+              <label>Edificio de la vivienda estudiada</label>
+              <select value={roadLdenBuildingId || buildings.find(b=>b.enabled)?.id || ''}
+                onChange={e=>{setRoadLdenBuildingId(e.target.value);setRoadLdenResult(null);setRoadFacadeAudit(null)}}>
+                {buildings.length===0 && <option value="">Dibuja el edificio</option>}
+                {buildings.filter(b=>b.enabled).map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
               <label>Receptor exterior para el cálculo Lden</label>
               <select value={roadLdenReceiverId || receivers[0]?.id || ''}
-                onChange={event=>setRoadLdenReceiverId(event.target.value)}>
+                onChange={event=>{setRoadLdenReceiverId(event.target.value);setRoadLdenResult(null);setRoadFacadeAudit(null)}}>
                 {receivers.length === 0 && <option value="">Añade primero un receptor en el mapa</option>}
                 {receivers.map(receiver=>(
                   <option key={receiver.id} value={receiver.id}>{receiver.name} · h={Number(receiver.height_m).toFixed(1)} m</option>
                 ))}
               </select>
-              <button type="button" className="road-lden-calc" disabled={roadLdenLoading || !receivers.length}
+              <button type="button" className="road-lden-calc" disabled={roadLdenLoading || !receivers.length || !buildings.some(b=>b.enabled)}
                 onClick={calculateRoadLden}>
                 {roadLdenLoading ? 'Calculando Lday, Levening y Lnight…' : 'Calcular Lden en receptor'}
               </button>
+              {roadFacadeAudit && <div className="road-lden-results">
+                <strong>Revisión de fachada · {roadFacadeAudit.valid_for_incident_facade_demo?'Correcta':'Requiere revisión'}</strong>
+                <span>Receptor–fachada: <strong>{roadFacadeAudit.receiver_to_facade_m.toFixed(2)} m</strong></span>
+                <span>Fachada–calle: <strong>{roadFacadeAudit.facade_to_road_m.toFixed(1)} m</strong></span>
+                <span>Altura receptor: <strong>{roadFacadeAudit.receiver_height_m.toFixed(1)} m</strong></span>
+                <span>Fachada identificada: <strong>N.º {roadFacadeAudit.facade_edge_index}</strong></span>
+                <span>Hacia la calle: <strong>{roadFacadeAudit.receiver_street_side?'Sí':'No'}</strong></span>
+                {roadFacadeAudit.warnings?.map((warning,index)=><p key={index}>{warning}</p>)}
+              </div>}
               {roadLdenError && <div className="road-lden-error" role="alert">{roadLdenError}</div>}
               {roadLdenResult && roadLdenResult.road_id === selectedObject.id && (
                 <div className="road-lden-results">
@@ -6594,7 +6636,7 @@ function App() {
                   ))}
                   <div className="road-lden-total">Lden · {roadLdenResult.lden_dba === null
                     ? 'Sin tráfico' : `${roadLdenResult.lden_dba.toFixed(1)} dB(A)`}</div>
-                  <p>Estimación académica; **NO** predicción CNOSSOS-EU 2.5 normativa.</p>
+                  <p>Lden incidente en fachada: se excluye la reflexión propia. Modelo académico; NO es CNOSSOS-EU §2.5 validado.</p>
                   <button type="button" onClick={()=>downloadJsonFile(roadLdenResult,'chimbote_noise_map_lden_no_normativo.json')}>
                     Exportar JSON para el Diplomado
                   </button>
