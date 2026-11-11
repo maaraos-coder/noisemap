@@ -4845,3 +4845,36 @@ select {
 .noise-opacity-control small {font-size:11px;line-height:1.45;color:#526b80}
 .auxiliary-list-item {font:inherit;font-size:12px;overflow-wrap:anywhere}
 @media(max-width:900px){.layers-popover{--popover-top:92px}}
+
+
+/* 2026-11-11 · Drawing instruction stays fully visible above bottom object toolbar.
+   The toolbar includes a title, coordinate controls and two tool rows on
+   some viewport heights. The previous 112px clearance let the status-pill
+   slide behind it. Keep a distinct vertical separation on all breakpoints. */
+.status-pill {
+  position: absolute;
+  bottom: calc(184px + env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 45 !important;
+  max-width: min(660px, calc(100vw - 28px));
+  width: max-content;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  padding: 10px 16px;
+  pointer-events: none;
+}
+@media (max-width: 900px) {
+  .status-pill {
+    bottom: calc(173px + env(safe-area-inset-bottom, 0px)) !important;
+    max-width: calc(100vw - 22px);
+    font-size: 12px;
+  }
+}
+@media (max-height: 480px) {
+  .status-pill {
+    bottom: calc(153px + env(safe-area-inset-bottom, 0px)) !important;
+    font-size: 11px;
+    padding: 7px 10px;
+  }
+}
