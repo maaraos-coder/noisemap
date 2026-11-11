@@ -16,7 +16,7 @@ def cnossos_emission_available() -> tuple[bool,str]:
         return True, "Motor de emisión CNOSSOS-EU disponible (phonometry, tablas F de 2021)."
     except Exception as exc:
         return False, ("Emisión CNOSSOS-EU no disponible en este entorno: "
-                       f"{type(exc).__name__}. Instalar phonometry con Python >=3.12.")
+                       f"{type(exc).__name__}. Instalar phonometry con Python >=3.13.")
 
 def calculate_road_emission(period_flows: dict, speed_kmh: float,
                             slope_percent: float = 0.0,
