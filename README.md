@@ -38,6 +38,14 @@ La pérdida por barrera usa una aproximación didáctica basada en diferencia de
 
 **No utilizar esta versión para informes regulatorios, peritajes o decisiones profesionales.**
 
+## Pestaña Tránsito y Lden — Curso 5 Laboratorio 2
+
+Existe una pestaña **🚗 Tránsito y Lden** para configurar un escenario de aforos docentes por períodos día/tarde/noche, documentar velocidad, pavimento y receptor exterior del caso Edificio Chimbote, y exportar esos antecedentes en JSON. Si se introducen los **niveles de período calculados externamente**, la pestaña realiza la agregación energética reglada de **Lden** (12/4/8 horas y penalizaciones +5/+10 dB).
+
+**Limitación explícita:** no existe todavía en esta versión un módulo de **emisión y propagación CNOSSOS-EU**. Los aforos no producen directamente un nivel receptor ni un mapa estratégico. El mapa de la pestaña general continúa usando el motor puntual didáctico, que no equivale a CNOSSOS-EU. No atribuir predicciones CNOSSOS-EU a esta herramienta sin integrar y validar un motor conforme a las Directivas 2015/996 y 2021/1226.
+
+Para el laboratorio, el Lden calculado a partir de niveles documentados se transfiere a la Etapa 6 del Curso 5, donde se vincula con los resultados de aislamiento de fachada obtenidos en SONARA.
+
 ## Estructura
 
 ```text
