@@ -21,6 +21,7 @@ from noise_app.engine import (
     source_to_point_breakdown,
 )
 from noise_app.map_view import make_map, rgba_from_grid
+from noise_app.road_scenario import lden, DEFAULT_TRAFFIC, validate_traffic, describe_scope
 
 
 st.set_page_config(
@@ -503,8 +504,8 @@ if calculate_pressed:
         st.session_state.map_dirty = False
 
 
-tab_map, tab_objects, tab_results, tab_method = st.tabs(
-    ["🗺️ Mapa", "🧱 Objetos", "📊 Resultados", "🧮 Método"]
+tab_map, tab_objects, tab_results, tab_road, tab_method = st.tabs(
+    ["🗺️ Mapa", "🧱 Objetos", "📊 Resultados", "🚗 Tránsito y Lden", "🧮 Método"]
 )
 
 
@@ -738,6 +739,86 @@ with tab_results:
         hide_index=True,
     )
 
+
+with tab_road:
+    st.subheader("Escenario de tránsito vial · diseño acústico de fachada")
+    st.warning(
+        "**Estado del motor:** esta versión de NoiseMap NO implementa todavía "
+        "la emisión y propagación completa de CNOSSOS-EU. "
+        "Los aforos y velocidades se registran como escenario, y el Lden se "
+        "calcula **solo cuando ingresas Lday, Levening y Lnight** obtenidos "
+        "de un modelo acústico documentado. No se predice Lden desde los aforos."
+    )
+    st.markdown("#### 1 · Ficha de la vía y receptor")
+    road_name = st.text_input("Vía", value="Pasaje Chimbote", key="nm_road_name")
+    receptor_name = st.text_input("Receptor exterior", value="CH-A-P05-S03 · fachada sur · piso 5",
+                                  key="nm_road_receptor")
+    cols = st.columns(3)
+    speed = cols[0].number_input("Velocidad media [km/h]", min_value=5, max_value=130,
+                                 value=50, step=5, key="nm_road_speed")
+    slope = cols[1].number_input("Pendiente vial [%]", min_value=-15.0,max_value=15.0,
+                                 value=0.0, step=0.5, key="nm_road_slope")
+    height = cols[2].number_input("Altura receptor [m]", min_value=0.1,max_value=100.0,
+                                 value=13.0,step=0.5,key="nm_road_height")
+    surface = st.selectbox("Pavimento supuesto", ["Asfalto convencional","Hormigón","Otro / justificar"],
+                           key="nm_road_surface")
+    st.caption("Los valores iniciales son supuestos docentes: no representan aforos reales ni condiciones medidas del pasaje.")
+    st.markdown("#### 2 · Flujos horarios supuestos")
+    tcols=st.columns(3)
+    flow_data={}
+    labels={"day":"Día · 12 h","evening":"Tarde · 4 h","night":"Noche · 8 h"}
+    for col,period in zip(tcols,("day","evening","night")):
+        with col:
+            st.markdown(f"**{labels[period]}**")
+            flow_data[period]={}
+            for vehicle,label in (("light","Livianos/h"),("medium","Pesados medianos/h"),
+                                  ("heavy","Pesados/h"),("motorcycles","Motos/h")):
+                flow_data[period][vehicle]=st.number_input(
+                    label,min_value=0,max_value=100000,
+                    value=DEFAULT_TRAFFIC[period][vehicle],step=1,
+                    key=f"nm_road_{period}_{vehicle}"
+                )
+    validate_traffic(flow_data)
+    st.markdown("#### 3 · Niveles de período obtenidos de una modelación acústica")
+    st.info(describe_scope())
+    enable_levels=st.checkbox("Dispongo de Lday, Levening y Lnight calculados para este receptor",
+                              key="nm_road_levels_ok")
+    results={}
+    if enable_levels:
+        cols=st.columns(3)
+        for col,period,label in zip(cols,("day","evening","night"),
+                                    ("Lday [dB(A)]","Levening [dB(A)]","Lnight [dB(A)]")):
+            results[period]=col.number_input(label,min_value=-20.0,max_value=150.0,
+                                              value=50.0,step=0.5,
+                                              key=f"nm_road_level_{period}")
+        method=st.text_input("Modelo de cálculo, versión, condiciones y evidencia",
+                             value="",key="nm_road_method")
+        level=lden(results["day"],results["evening"],results["night"])
+        st.metric("Lden calculado a partir de los tres niveles de período",f"{level:.1f} dB(A)")
+        if not method.strip():
+            st.warning("Falta declarar el origen de los niveles de período: no atribuyas este Lden a CNOSSOS-EU sin una simulación y validación trazables.")
+    else:
+        level=None
+        method=""
+        st.caption("Lden pendiente: todavía no se han introducido niveles calculados. Los aforos por sí solos no determinan un Lden.")
+    export={
+        "schema_version":1,"scenario":"Curso 5 · Laboratorio 2",
+        "project":"Edificio Chimbote","unit":"CH-A-P05-S03",
+        "road":{"name":road_name,"surface":surface,"speed_kmh":speed,"slope_percent":slope},
+        "receiver":{"name":receptor_name,"height_m":height},
+        "periods_hours":{"day":12,"evening":4,"night":8},
+        "hourly_traffic":flow_data,
+        "source_method_status":"traffic input only; no CNOSSOS-EU emission/propagation calculated",
+        "model_evidence":method,
+        "period_levels_dba":results if enable_levels else None,
+        "lden_dba":round(level,2) if level is not None else None,
+        "lden_equation":"12/24 day; 4/24 evening +5; 8/24 night +10",
+    }
+    st.download_button("Descargar ficha de tránsito, receptor y Lden (JSON)",
+        data=json.dumps(export,ensure_ascii=False,indent=2).encode("utf-8"),
+        file_name="chimbote_c5l2_trafico_lden.json",mime="application/json",
+        key="nm_road_export")
+    st.caption("Este módulo no modela la calle ni produce un mapa CNOSSOS-EU. La pestaña Mapa conserva su motor didáctico simplificado; su raster no debe etiquetarse Lden CNOSSOS.")
 
 with tab_method:
     st.subheader("Funcionamiento de esta versión")
