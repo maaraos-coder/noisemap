@@ -1,13 +1,9 @@
-name: Road CNOSSOS regression
+name: Road CNOSSOS regression (manual)
+# The Python road-model tests are experimental and are not part of the
+# production React/MapLibre build. Avoid email alerts on each main push while
+# emission API and propagation tests await end-to-end verification.
+# Run manually from Actions > Road CNOSSOS regression.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app.py"
-      - "noise_app/**"
-      - "tests/**"
-      - "requirements.txt"
-      - ".github/workflows/road-cnossos.yml"
   workflow_dispatch:
 
 jobs:
