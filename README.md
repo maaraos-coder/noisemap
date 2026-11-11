@@ -38,13 +38,21 @@ La pérdida por barrera usa una aproximación didáctica basada en diferencia de
 
 **No utilizar esta versión para informes regulatorios, peritajes o decisiones profesionales.**
 
-## Pestaña Tránsito y Lden — Curso 5 Laboratorio 2
+## Tránsito y Lden · Curso 5 / Laboratorio 2
 
-Existe una pestaña **🚗 Tránsito y Lden** para configurar un escenario de aforos docentes por períodos día/tarde/noche, documentar velocidad, pavimento y receptor exterior del caso Edificio Chimbote, y exportar esos antecedentes en JSON. Si se introducen los **niveles de período calculados externamente**, la pestaña realiza la agregación energética reglada de **Lden** (12/4/8 horas y penalizaciones +5/+10 dB).
+La pestaña **🚗 Tránsito y Lden** contiene tres niveles de cálculo claramente diferenciados:
 
-**Limitación explícita:** no existe todavía en esta versión un módulo de **emisión y propagación CNOSSOS-EU**. Los aforos no producen directamente un nivel receptor ni un mapa estratégico. El mapa de la pestaña general continúa usando el motor puntual didáctico, que no equivale a CNOSSOS-EU. No atribuir predicciones CNOSSOS-EU a esta herramienta sin integrar y validar un motor conforme a las Directivas 2015/996 y 2021/1226.
+1. **Emisión vial CNOSSOS-EU, sección 2.2:** integra `phonometry` y su base de coeficientes por bandas de octava 63 Hz–8 kHz, incluidas tablas F-1/F-4 modificadas por 2021/1226. Para usarlo, el entorno necesita Python 3.12+ y la dependencia `phonometry`. Salida: Lw' de la fuente vial por metro de trazado, **no un nivel en receptor**.
+2. **Estimación docente en receptor y mapa esquemático:** discretiza una vía recta y suma geométricamente las contribuciones en espacio libre. Produce Lday, Levening, Lnight, Lden y una grilla ilustrativa (no georreferenciada). **NO implementa el método de propagación CNOSSOS-EU sección 2.5**; omite efecto de suelo, meteorología, edificios, difracción, reflexiones, absorción atmosférica y topografía. No se debe utilizar para afirmar cumplimiento normativo.
+3. **Combinación energética Lden:** si el usuario dispone de Lday, Levening y Lnight de un modelo validado, calcula Lden mediante los períodos 12/4/8 horas y las penalizaciones 0/+5/+10 dB. Puede exportar los resultados y las hipótesis como JSON.
 
-Para el laboratorio, el Lden calculado a partir de niveles documentados se transfiere a la Etapa 6 del Curso 5, donde se vincula con los resultados de aislamiento de fachada obtenidos en SONARA.
+El escenario académico predeterminado se refiere a **Pasaje Chimbote**, próximo a la fachada sur de la vivienda CH-A-P05-S03 (Torre A), con **flujos docentes supuestos**. El valor predeterminado de velocidad es 30 km/h; no son aforos ni niveles medidos.
+
+**Para obtener un mapa CNOSSOS-EU completo** falta integrar y validar un motor de propagación 2.5 como NoiseModelling de Université Gustave Eiffel, con geometría GIS, edificios, suelo, condiciones favorables/desfavorables, reflexiones y pruebas de referencia. El motor puntual original de la pestaña «Mapa» no es equivalente a dicha propagación.
+
+### Flujo de trabajo con SONARA
+
+Exporta el JSON de receptor → importa los niveles en la Etapa 6 del Curso 5 · Laboratorio 2 → documenta si se trata de una estimación preliminar o de resultados de un motor CNOSSOS validado → utiliza SONARA para calcular y mejorar el aislamiento de fachada → consulta el requisito Clase B de ISO/TS 19488:2021. Un Lden calculado a partir de una propagación simplificada **no demuestra conformidad normativa**.
 
 ## Estructura
 
