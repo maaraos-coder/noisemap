@@ -107,3 +107,21 @@ def test_wrong_facade_selected_must_error():
     with pytest.raises(HTTPException) as e:
         receiver_preview(payload)
     assert e.value.status_code == 422
+
+
+def test_incident_prediction_not_greater_than_with_self_reflection():
+    setting=GridSettings(reflections_enabled=True, ground_factor=0)
+    standard=receiver_preview(ReceiverPreviewRequest(
+        roads=[road()], buildings=[building()], receiver=receiver(),
+        settings=setting
+    ))
+    incident=receiver_preview(ReceiverPreviewRequest(
+        roads=[road()], buildings=[building()], receiver=receiver(),
+        settings=setting,
+        facade_exclude_building_id="residence",
+        facade_exclude_edge_index=1
+    ))
+    assert standard["level_db"] is not None
+    assert incident["level_db"] is not None
+    assert standard["level_db"] >= incident["level_db"]-0.001
+    assert standard["level_db"]-incident["level_db"] <= 10
