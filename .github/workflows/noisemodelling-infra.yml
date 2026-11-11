@@ -1,0 +1,38 @@
+name: NoiseModelling deployment manifest checks
+on:
+  push:
+    branches: [feature/noisemodelling-engine-service]
+  pull_request:
+    branches: [v3-react-maplibre]
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install 'pyyaml==6.0.2'
+      - name: Check dedicated Blueprint security and resources
+        run: |
+          python - <<'PY'
+          import yaml
+          with open('deploy/noisemodelling/render-blueprint.yaml') as f:
+              data=yaml.safe_load(f)
+          assert len(data["services"]) == 1
+          service=data["services"][0]
+          assert service["runtime"] == "image"
+          assert service["type"] == "web"
+          assert "ghcr.io/universite-gustave-eiffel/noisemodelling:" in service["image"]["url"]
+          assert service["disk"]["mountPath"] == "/srv/noisemodelling/workspace"
+          assert service["disk"]["sizeGB"] >= 5
+          variables={item["key"]:item for item in service["envVars"]}
+          assert "UNSECURE_MODE" not in variables
+          assert variables["DB_ENCRYPTION_SECRET"]["generateValue"] is True
+          assert service["plan"] != "free"
+          with open('deploy/noisemodelling/docker-compose.yml') as f:
+              compose=yaml.safe_load(f)
+          assert compose["services"]["cnossos"]["ports"] == ["127.0.0.1:8008:8000"]
+          assert "DB_ENCRYPTION_SECRET" in compose["services"]["cnossos"]["environment"]
+          print("Secure manifests validated")
+          PY
