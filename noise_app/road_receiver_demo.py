@@ -83,3 +83,59 @@ def illustrative_free_field_levels(
                      "buildings and reflections","diffraction/barriers",
                      "terrain and 3D road positioning","atmospheric absorption"],
     }
+
+
+def illustrative_lden_grid(
+    traffic:dict, speed_kmh:float, receiver_height_m:float,
+    road_length_m:float=250.0, cross_road_extent_m:float=100.0,
+    grid_size:int=45, element_length_m:float=5.0,
+    slope_percent:float=0.0, temperature_c:float=20.0,
+    surface:str="reference road surface"
+)->dict:
+    """Non-georeferenced illustrative Lden raster about a straight source line.
+
+    x runs along the road, and y is distance perpendicular to it. This is a
+    free-field classroom visualization, not CNOSSOS-EU section 2.5.
+    """
+    import numpy as np
+    if not (20<=grid_size<=120):
+        raise ValueError("La grilla debe tener entre 20 y 120 puntos por eje.")
+    if road_length_m<=0 or cross_road_extent_m<=1 or receiver_height_m<=0:
+        raise ValueError("Geometría inválida para grilla de calle.")
+    emissions=calculate_road_emission(
+        traffic,speed_kmh=speed_kmh,
+        slope_percent=slope_percent,temperature_c=temperature_c,
+        surface=surface)
+    count=math.ceil(road_length_m/element_length_m)
+    if count>1500:
+        raise ValueError("Exceso de segmentos en la vía.")
+    step=road_length_m/count
+    xs=np.linspace(-road_length_m/2,road_length_m/2,grid_size)
+    # Raster's first row is furthest from the road, for a clear map convention.
+    ys=np.linspace(cross_road_extent_m,2.0,grid_size)
+    X,Y=np.meshgrid(xs,ys)
+    segment_x=(np.arange(count)+0.5)*step-road_length_m/2
+    h=receiver_height_m-SOURCE_HEIGHT_M
+    rsq=(X[:,:,None]-segment_x[None,None,:])**2+Y[:,:,None]**2+h*h
+    geometric_transfer=np.sum(step/(4*math.pi*rsq),axis=2)
+    period_levels={}
+    for period,source in emissions.items():
+        bands=source["line_power_db_per_m"]
+        if all(val is None for val in bands):
+            continue
+        weighted_power=sum(10**((value+weight)/10)
+                           for value,weight in zip(bands,A_WEIGHT)
+                           if value is not None)
+        if weighted_power>0:
+            period_levels[period]=weighted_power*geometric_transfer
+    total=np.zeros((grid_size,grid_size),dtype=float)
+    for period,(hours,penalty) in {
+        "day":(12,0),"evening":(4,5),"night":(8,10)}.items():
+        if period in period_levels:
+            total+=hours/24*10**(penalty/10)*period_levels[period]
+    levels=np.where(total>0,10*np.log10(np.maximum(total,1e-20)),np.nan)
+    return {
+        "levels_dba":levels,"extent_x_m":(float(xs[0]),float(xs[-1])),
+        "extent_y_m":(float(ys[-1]),float(ys[0])),
+        "status":"Illustrative free-field CNOSSOS emission; NOT CNOSSOS propagation 2.5",
+    }
