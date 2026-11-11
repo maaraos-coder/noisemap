@@ -17,8 +17,11 @@ import ezdxf
 from pyproj import CRS, Transformer
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from noise_app.cnossos_adapter import line_emission_cnossos, SURFACES
+from noise_app.noisemodelling_export import package_scenario
 from noise_app.engine import (
     Barrier,
     PropagationSettings,
@@ -71,8 +74,20 @@ CNOSSOS_ROAD_F1 = {
         (108.8, 104.2, 103.5, 102.9, 102.6, 98.5, 93.8, 87.5),
         (0.0, 3.0, 4.6, 5.0, 5.0, 5.0, 5.0, 5.0),
     ),
+    # Table F-1 of Directive (EU) 2021/1226. Motorcycles/mopeds:
+    # propulsion only, no rolling-noise contribution.
+    "4a": (
+        (0.0,) * 8, (0.0,) * 8,
+        (93.0, 93.0, 93.5, 95.3, 97.2, 100.4, 95.8, 90.9),
+        (4.2, 7.4, 9.8, 11.6, 15.7, 18.9, 20.3, 20.6),
+    ),
+    "4b": (
+        (0.0,) * 8, (0.0,) * 8,
+        (99.9, 101.9, 96.7, 94.4, 95.2, 94.7, 92.1, 88.6),
+        (3.2, 5.9, 11.9, 11.6, 11.5, 12.6, 11.1, 12.0),
+    ),
 }
-CNOSSOS_TEMP_K = {"1": 0.08, "2": 0.04, "3": 0.04}
+CNOSSOS_TEMP_K = {"1": 0.08, "2": 0.04, "3": 0.04, "4a": 0.0, "4b": 0.0}
 CNOSSOS_REF_SPEED = 70.0
 CNOSSOS_SOURCE_HEIGHT_M = 0.05
 
@@ -1042,6 +1057,17 @@ class RoadIn(BaseModel):
     speed_light_kmh: float = Field(default=50.0, gt=0.0)
     speed_medium_kmh: float = Field(default=50.0, gt=0.0)
     speed_heavy_kmh: float = Field(default=50.0, gt=0.0)
+    q_moped_vph: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    q_motorcycle_vph: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    speed_moped_kmh: float = Field(default=40.0, gt=0.0, allow_inf_nan=False)
+    speed_motorcycle_kmh: float = Field(default=50.0, gt=0.0, allow_inf_nan=False)
+    road_surface: str = "reference road surface"
+    road_slope_percent: float = Field(default=0.0, ge=-12.0, le=12.0, allow_inf_nan=False)
+    road_two_way: bool = True
+    studded_fraction: float = Field(default=0.0, ge=0.0, le=1.0, allow_inf_nan=False)
+    studded_months: float = Field(default=0.0, ge=0.0, le=12.0, allow_inf_nan=False)
+    junction_type: str = "none"
+    junction_chainage_m: Optional[float] = Field(default=None, ge=0.0, allow_inf_nan=False)
 
 
 class BarrierIn(BaseModel):
@@ -1782,6 +1808,8 @@ def _cnossos_vehicle_spectrum(category: str, speed_kmh: float, temperature_c: fl
         + np.asarray(bp, dtype=float) * ((v - CNOSSOS_REF_SPEED) / CNOSSOS_REF_SPEED)
     )
 
+    if category in ("4a", "4b"):
+        return propulsion  # Only propulsion is defined for category 4.
     energy = np.power(10.0, rolling / 10.0) + np.power(10.0, propulsion / 10.0)
     return 10.0 * np.log10(energy)
 
@@ -1791,6 +1819,8 @@ def _cnossos_road_line_spectrum(road: RoadIn, temperature_c: float) -> np.ndarra
         ("1", road.q_light_vph, road.speed_light_kmh),
         ("2", road.q_medium_vph, road.speed_medium_kmh),
         ("3", road.q_heavy_vph, road.speed_heavy_kmh),
+        ("4a", road.q_moped_vph, road.speed_moped_kmh),
+        ("4b", road.q_motorcycle_vph, road.speed_motorcycle_kmh),
     )
     category_lines = []
     for category, q, speed in flows:
@@ -1822,7 +1852,9 @@ def _road_to_equivalent_sources(road: RoadIn, temperature_c: float) -> List[Sour
     if not road.enabled or len(road.points) < 2:
         return []
 
-    line_spectrum = _cnossos_road_line_spectrum(road, temperature_c)
+    # Full CNOSSOS-EU §2.2 road SOURCE emission; receiver propagation is
+    # still the existing educational model, NOT normative CNOSSOS-EU §2.5.
+    line_spectrum = line_emission_cnossos(road, temperature_c)
     if not np.any(np.isfinite(line_spectrum)):
         return []
 
@@ -1830,6 +1862,7 @@ def _road_to_equivalent_sources(road: RoadIn, temperature_c: float) -> List[Sour
     target = max(5.0, total_length / 120.0)
     result: List[SourceIn] = []
     seg_index = 0
+    travelled_m = 0.0
 
     for a, b in zip(road.points, road.points[1:]):
         lat_a, lon_a = float(a[0]), float(a[1])
@@ -1844,10 +1877,18 @@ def _road_to_equivalent_sources(road: RoadIn, temperature_c: float) -> List[Sour
 
         n = max(1, math.ceil(length / target))
         dl = length / n
-        segment_spectrum = line_spectrum + 10.0 * math.log10(dl)
-
         for j in range(n):
             f = (j + 0.5) / n
+            junction_distance = (
+                abs(travelled_m + (j + 0.5)*dl - road.junction_chainage_m)
+                if road.junction_type != "none" and road.junction_chainage_m is not None
+                else None
+            )
+            local_emission = (
+                line_emission_cnossos(road, temperature_c, junction_distance)
+                if junction_distance is not None else line_spectrum
+            )
+            segment_spectrum = local_emission + 10.0 * math.log10(dl)
             lat = lat_a + (lat_b - lat_a) * f
             lon = lon_a + (lon_b - lon_a) * f
             result.append(SourceIn(
@@ -1871,6 +1912,7 @@ def _road_to_equivalent_sources(road: RoadIn, temperature_c: float) -> List[Sour
                 source_kind="road",
             ))
             seg_index += 1
+        travelled_m += length
     return result
 
 
@@ -1934,6 +1976,71 @@ class CalculationResponse(BaseModel):
     min_level: Optional[float]
     max_level: Optional[float]
     receiver_results: List[dict] = []
+
+
+class CnossosInterchangeRequest(BaseModel):
+    road: RoadIn
+    traffic_periods: Dict[str, Dict[str, float]]
+    receivers: List[ReceiverIn] = []
+    buildings: List[BuildingIn] = []
+    barriers: List[BarrierIn] = []
+    temperature_c: float = Field(default=20.0, ge=-50.0, le=60.0, allow_inf_nan=False)
+
+
+@app.post("/api/cnossos/export-noisemodelling")
+def export_cnossos_to_noisemodelling(payload: CnossosInterchangeRequest):
+    """GIS interchange package (NOT a computed NoiseModelling scenario)."""
+    try:
+        archive = package_scenario(
+            payload.road, payload.traffic_periods,
+            payload.receivers, payload.buildings, payload.barriers,
+            payload.temperature_c,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=archive, media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="noisemap_cnossos_noisemodelling.zip"',
+                 "X-CNOSSOS-Propagation": "not-computed"},
+    )
+
+
+class CnossosRoadEmissionRequest(BaseModel):
+    road: RoadIn
+    temperature_c: float = Field(default=20.0, ge=-50.0, le=60.0, allow_inf_nan=False)
+    junction_distance_m: Optional[float] = Field(default=None, ge=0.0, allow_inf_nan=False)
+
+
+@app.post("/api/cnossos/road-emission")
+def cnossos_road_emission(payload: CnossosRoadEmissionRequest):
+    """Emission only: source-line power spectrum in dB re 1 pW/m."""
+    try:
+        spectrum = line_emission_cnossos(payload.road, payload.temperature_c,
+                                         payload.junction_distance_m)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    bands = {
+        str(freq): (round(float(db), 3) if np.isfinite(db) else None)
+        for freq, db in zip(OCTAVE_BANDS, spectrum)
+    }
+    a_sum = sum(10 ** ((float(level) + A_WEIGHTING_DB[freq]) / 10)
+                for freq, level in zip(OCTAVE_BANDS, spectrum)
+                if np.isfinite(level))
+    return {
+        "method": "CNOSSOS-EU road source emission §2.2, 2021/1226, phonometry",
+        "normative_propagation": False,
+        "bands_db_per_m": bands,
+        "lwa_db_per_m": round(10*math.log10(a_sum), 3) if a_sum else None,
+        "source_height_m": 0.05,
+        "assumptions": {
+            "surface": payload.road.road_surface,
+            "slope_percent": payload.road.road_slope_percent,
+            "two_way": payload.road.road_two_way,
+            "junction": payload.road.junction_type,
+            "studded_months": payload.road.studded_months,
+        },
+        "warning": "Potencia de fuente, no nivel en receptor; propagación §2.5 no validada.",
+    }
 
 
 @app.get("/api/health")

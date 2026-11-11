@@ -7,3 +7,4 @@ pyshp>=2.3,<3
 pyproj>=3.7,<4
 ezdxf>=1.4,<2
 python-multipart>=0.0.20,<1
+phonometry @ git+https://github.com/jmrplens/phonometry.git@bb9a890dce13a2d740025c8805160e8958c181c3

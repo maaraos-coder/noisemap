@@ -2,9 +2,9 @@ name: V3 build check
 
 on:
   push:
-    branches: [v3-react-maplibre]
+    branches: [v3-react-maplibre, feature/cnossos-road-five-categories]
   pull_request:
-    branches: [main]
+    branches: [main, v3-react-maplibre]
 
 jobs:
   frontend:
@@ -27,7 +27,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - run: pip install -r backend/requirements.txt
       - run: python -m compileall backend noise_app
       - run: python -m unittest backend/test_engine_regression.py
+      - run: pip install pytest
+      - run: python -m pytest -q backend/test_cnossos_road_five_categories.py backend/test_cnossos_full_emission.py
