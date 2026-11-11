@@ -17,7 +17,8 @@ def illustrative_free_field_levels(
     traffic:dict, speed_kmh:float, horizontal_distance_m:float,
     receiver_height_m:float, road_length_m:float=250.0,
     element_length_m:float=5.0, slope_percent:float=0.0,
-    temperature_c:float=20.0
+    temperature_c:float=20.0,
+    surface:str="reference road surface"
 )->dict:
     """Finite straight road, receptor opposite midpoint, all geometry in metres."""
     for label, value in {
@@ -31,7 +32,8 @@ def illustrative_free_field_levels(
         raise ValueError("La discretización de la vía excede los límites docentes")
     emissions=calculate_road_emission(
         traffic,speed_kmh=speed_kmh,
-        slope_percent=slope_percent,temperature_c=temperature_c)
+        slope_percent=slope_percent,temperature_c=temperature_c,
+        surface=surface)
     n=math.ceil(road_length_m/element_length_m)
     dx=road_length_m/n
     h=receiver_height_m-SOURCE_HEIGHT_M
