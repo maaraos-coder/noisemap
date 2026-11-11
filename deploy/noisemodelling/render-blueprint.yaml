@@ -1,0 +1,27 @@
+# Dedicated NoiseModelling CNOSSOS-EU §2.5 compute service.
+# Standalone Blueprint: import this file as a NEW blueprint (do not
+# replace the existing render.yaml, which deploys the Python API).
+# IMPORTANT: paid compute and persistent storage are needed; review charges.
+services:
+  - type: web
+    name: noisemap-cnossos-engine
+    runtime: image
+    image:
+      url: ghcr.io/universite-gustave-eiffel/noisemodelling:main
+    region: oregon
+    plan: 1c-2g
+    numInstances: 1
+    healthCheckPath: /
+    disk:
+      name: noisemodelling-workspace
+      mountPath: /srv/noisemodelling/workspace
+      sizeGB: 5
+    envVars:
+      - key: JAVA_OPTS
+        value: -Xms256m -Xmx1536m
+      - key: ROOT_URL
+        value: ""
+      - key: DB_ENCRYPTION_SECRET
+        generateValue: true
+      # Do NOT define UNSECURE_MODE. Its presence disables authentication.
+      # NoiseModelling admin registration uses built-in TOTP.
