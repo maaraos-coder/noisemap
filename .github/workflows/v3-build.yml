@@ -32,4 +32,4 @@ jobs:
       - run: python -m compileall backend noise_app
       - run: python -m unittest backend/test_engine_regression.py
       - run: pip install pytest
-      - run: python -m pytest -q backend/test_cnossos_road_five_categories.py backend/test_cnossos_full_emission.py
+      - run: python -m pytest -q backend/test_cnossos_road_five_categories.py backend/test_cnossos_full_emission.py backend/test_facade_lden_audit.py
