@@ -72,3 +72,35 @@ def test_segmentation_preserves_energy_of_line_in_reference_no_junction():
         ))
         assert abs(segment_total - (spectrum[(63,125,250,500,1000,2000,4000,8000).index(freq)]
                                       + 10*math.log10(length))) < .1
+
+
+def test_noise_modelling_export_includes_all_periods_and_geometries():
+    from io import BytesIO
+    from zipfile import ZipFile
+    import json
+    from noise_app.noisemodelling_export import package_scenario
+    from backend.main import ReceiverIn, BuildingIn, BarrierIn
+    r=road()
+    counts={
+        "day":{"light":100,"medium":4,"heavy":1,"moped":5,"motorcycle":6},
+        "evening":{"light":40,"medium":2,"heavy":0,"moped":1,"motorcycle":3},
+        "night":{"light":5,"medium":0,"heavy":0,"moped":0,"motorcycle":2},
+    }
+    receiver=ReceiverIn(id="rec",name="Fachada",lat=-33.4505,lon=-70.6504,height_m=7)
+    building=BuildingIn(id="b",name="Edificio",points=[
+        [-33.45,-70.65],[-33.45,-70.6501],[-33.4501,-70.6501]
+    ],height_m=12)
+    barrier=BarrierIn(id="w",name="Pantalla",lat_a=-33.45,lon_a=-70.65,
+                      lat_b=-33.4501,lon_b=-70.65,height_m=3)
+    result=package_scenario(r,counts,[receiver],[building],[barrier],20)
+    with ZipFile(BytesIO(result)) as z:
+        assert len(z.namelist()) == 9
+        for period in ("DAY","EVENING","NIGHT"):
+            data=json.loads(z.read(f"LW_ROADS_{period}.geojson"))
+            assert data["features"]
+            assert all("LW63" in f["properties"] and "LW8000" in f["properties"]
+                       for f in data["features"])
+        assert len(json.loads(z.read("RECEIVERS.geojson"))["features"]) == 1
+        assert len(json.loads(z.read("BUILDINGS.geojson"))["features"]) == 1
+        assert len(json.loads(z.read("WALLS.geojson"))["features"]) == 1
+        assert json.loads(z.read("scenario.json"))["normative_result"] is False
