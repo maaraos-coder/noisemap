@@ -5802,11 +5802,7 @@ function App() {
                 <option value="first">Primer orden</option>
               </select>
             </label>
-            <label className="check-row">
-              <input type="checkbox" checked={globalSettings.facade_1m}
-                onChange={e => setGlobalSettings(s => ({ ...s, facade_1m: e.target.checked }))} />
-              Fachada a 1 m
-            </label>
+            <div className="future-note">La reflexión de la propia fachada se excluye únicamente en el cálculo Lden incidente del editor de vías, tras comprobar geométricamente el receptor. No se mueve automáticamente el receptor 1 m.</div>
             <div className="future-note">Activo en el motor: reflexión especular de primer orden mediante fuente imagen, descartando trayectorias reflejadas bloqueadas por otros obstáculos. La reflectividad se define en cada barrera.</div>
           </div>
 
