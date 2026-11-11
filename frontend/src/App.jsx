@@ -4595,6 +4595,14 @@ function App() {
       </header>
 
       <div className="object-toolbar">
+        {mode === 'road' && (
+          <div className="object-toolbar-road-instruction" role="status" aria-live="polite">
+            <strong>Tráfico vial · {roadDraft.length} vértices</strong>
+            <span>{roadDraft.length < 2
+              ? 'Marca al menos dos puntos sobre el mapa para trazar el eje de la vía.'
+              : 'Continúa marcando puntos o pulsa «Finalizar vía» en esta barra.'}</span>
+          </div>
+        )}
         <div className="object-toolbar-title">Agregar objetos · Ubicar en el mapa</div>
         <button className="coordinate-tool" onClick={()=>{setMode('navigate');setCoordinateEditor(selectedAuxiliaryId?{type:'auxiliary',object:auxiliaryPolygons.find(p=>p.id===selectedAuxiliaryId)}:{type:mode==='auxiliary-polygon'?'auxiliary':['source','receiver','barrier','building','road','polygon','line'].includes(mode)?(mode==='line'?'accessory':mode):'source'})}}>Ingresar coordenadas</button>
         {selectedObject && ['source','receiver','barrier','building','road','accessory'].includes(selected?.type) && <button onClick={()=>setCoordinateEditor({type:selected.type,object:selectedObject})}>Editar coordenadas · {selectedObject.name}</button>}
@@ -6933,12 +6941,6 @@ function App() {
           Barrera · {barrierHover
             ? haversineMeters(barrierStart[0], barrierStart[1], barrierHover[0], barrierHover[1]).toFixed(1)
             : '0.0'} m · selecciona el segundo extremo
-        </div>
-      )}
-
-      {mode === 'road' && (
-        <div className="status-pill">
-          Tráfico vial · {roadDraft.length} vértices · dibuja el eje de la vía y pulsa “Finalizar vía”
         </div>
       )}
 
