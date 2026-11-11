@@ -1382,6 +1382,8 @@ function App() {
   const [roadLdenReceiverId, setRoadLdenReceiverId] = useState('')
   const [roadEmissionResult, setRoadEmissionResult] = useState(null)
   const [roadEmissionLoading, setRoadEmissionLoading] = useState(false)
+  const [noisemodellingExportLoading, setNoisemodellingExportLoading] = useState(false)
+  const [noisemodellingExportError, setNoisemodellingExportError] = useState('')
 
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -3626,6 +3628,44 @@ function App() {
       setAccessories(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    }
+  }
+
+  const exportRoadToNoiseModelling = async () => {
+    if (selected?.type !== 'road' || !selectedObject) return
+    setNoisemodellingExportLoading(true)
+    setNoisemodellingExportError('')
+    try {
+      const periods = selectedObject.traffic_periods || {
+        day:{light:80,medium:3,heavy:1,moped:0,motorcycle:0},
+        evening:{light:45,medium:1,heavy:0,moped:0,motorcycle:0},
+        night:{light:10,medium:0,heavy:0,moped:0,motorcycle:0}
+      }
+      const res = await fetch(`${API_BASE}/api/cnossos/export-noisemodelling`, {
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          road:selectedObject, traffic_periods:periods,
+          receivers, buildings, barriers,
+          temperature_c:globalSettings.temperature_c
+        })
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(()=>({}))
+        throw new Error(payload.detail || `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href=downloadUrl
+      anchor.download='noisemap_cnossos_noisemodelling.zip'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch(e) {
+      setNoisemodellingExportError(e.message || 'No fue posible exportar.')
+    } finally {
+      setNoisemodellingExportLoading(false)
     }
   }
 
@@ -6500,6 +6540,12 @@ function App() {
                 Emisión vial conforme a CNOSSOS-EU 2.2 (phonometry, tablas F-1 a F-4);
                 la propagación exterior en receptores sigue siendo educativa y NO implementa CNOSSOS-EU 2.5.
               </div>
+              <h4 className="subheading">Intercambio con NoiseModelling · CNOSSOS-EU §2.5</h4>
+              <p className="road-lden-help">Exporta calles, fuentes espectrales de día/tarde/noche, edificios, barreras y receptores en GeoJSON. El paquete requiere reproyección, configuración 3D y cálculo en NoiseModelling: no incluye niveles de propagación reglamentarios.</p>
+              <button type="button" className="road-lden-calc" disabled={noisemodellingExportLoading} onClick={exportRoadToNoiseModelling}>
+                {noisemodellingExportLoading ? 'Preparando capas...' : 'Exportar escenario para NoiseModelling (.zip)'}
+              </button>
+              {noisemodellingExportError && <p className="road-lden-error" role="alert">{noisemodellingExportError}</p>}
               <h4 className="subheading">Lden de tránsito · tres períodos</h4>
               <p className="road-lden-help">Datos supuestos para Pasaje Chimbote. Son flujos medios horarios, NO aforos reales. La velocidad de cada categoría se define arriba.</p>
               {Object.entries({
