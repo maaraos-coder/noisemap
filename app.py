@@ -745,11 +745,12 @@ with tab_results:
 with tab_road:
     st.subheader("Escenario de tránsito vial · diseño acústico de fachada")
     st.warning(
-        "**Estado del motor:** esta versión de NoiseMap NO implementa todavía "
-        "la emisión y propagación completa de CNOSSOS-EU. "
-        "Los aforos y velocidades se registran como escenario, y el Lden se "
-        "calcula **solo cuando ingresas Lday, Levening y Lnight** obtenidos "
-        "de un modelo acústico documentado. No se predice Lden desde los aforos."
+        "**Estado del método:** el módulo calcula la **emisión CNOSSOS-EU 2.2** "
+        "con tablas vigentes 2021 mediante phonometry. Para previsualizar niveles "
+        "en un receptor usa una **propagación geométrica didáctica**, NO "
+        "CNOSSOS-EU 2.5 (faltan suelo, edificios, reflexiones, difracción "
+        "y meteorología). El Lden preliminar no debe utilizarse como "
+        "predicción normativa ni certificación."
     )
     st.markdown("#### 1 · Ficha de la vía y receptor")
     road_name = st.text_input("Vía", value="Pasaje Chimbote", key="nm_road_name")
@@ -757,7 +758,7 @@ with tab_road:
                                   key="nm_road_receptor")
     cols = st.columns(3)
     speed = cols[0].number_input("Velocidad media [km/h]", min_value=5, max_value=130,
-                                 value=50, step=5, key="nm_road_speed")
+                                 value=30, step=5, key="nm_road_speed")
     slope = cols[1].number_input("Pendiente vial [%]", min_value=-15.0,max_value=15.0,
                                  value=0.0, step=0.5, key="nm_road_slope")
     height = cols[2].number_input("Altura receptor [m]", min_value=0.1,max_value=100.0,
