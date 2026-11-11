@@ -1153,13 +1153,6 @@ class BarrierProfileRequest(BaseModel):
     settings: GridSettings = GridSettings()
 
 
-class ReceiverPreviewRequest(BaseModel):
-    # Only for incident facade predictions: suppress the selected receiver
-    # wall's OWN specular reflection, never a blanket -3 dB adjustment.
-    facade_exclude_building_id: Optional[str] = None
-    facade_exclude_edge_index: Optional[int] = Field(default=None, ge=1)
-
-
 class FacadeAuditRequest(BaseModel):
     road: RoadIn
     building: BuildingIn
@@ -1182,6 +1175,9 @@ def facade_audit(payload: FacadeAuditRequest):
 
 
 class ReceiverPreviewRequest(BaseModel):
+    # Exclude solely the own facade's reflection in a receptor calculation.
+    facade_exclude_building_id: Optional[str] = None
+    facade_exclude_edge_index: Optional[int] = Field(default=None, ge=1)
     sources: List[SourceIn] = []
     roads: List[RoadIn] = []
     receiver: ReceiverIn
@@ -2268,27 +2264,6 @@ def acoustic_cut(payload: AcousticCutRequest):
         lat0,
         lon0,
     )
-    # Disable ONLY the reflection of the selected receiver-facing facade.
-    # Keep the wall's screening/diffraction geometry and other building
-    # reflections unchanged. This is not a generic -3 dB correction.
-    if payload.facade_exclude_building_id is not None:
-        target_building = next((b for b in payload.buildings
-                                if b.id == payload.facade_exclude_building_id and b.enabled), None)
-        if target_building is None:
-            raise HTTPException(status_code=422, detail="Edificio de fachada no encontrado.")
-        audit = facade_geometry_audit(
-            payload.roads[0].points if payload.roads else [],
-            target_building.points, payload.receiver.lat,
-            payload.receiver.lon, payload.receiver.height_m
-        )
-        if payload.facade_exclude_edge_index != audit["facade_edge_index"]:
-            raise HTTPException(status_code=422, detail="La fachada seleccionada no coincide con la geometría del receptor.")
-        if not audit["valid_for_incident_facade_demo"]:
-            raise HTTPException(status_code=422, detail="Receptor exterior no válido para incidencia de fachada: " + "; ".join(audit["warnings"]))
-        facade_name = f"{target_building.name} · fachada {payload.facade_exclude_edge_index}"
-        barriers = [replace(item, reflection_percent=0.0)
-                    if item.name == facade_name else item for item in barriers]
-
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
         frequency_hz=payload.settings.frequency_hz,
@@ -2409,6 +2384,27 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         lat0,
         lon0,
     )
+
+    # Disable ONLY the reflection of the selected receiver-facing facade.
+    # Keep the wall's screening/diffraction geometry and other building
+    # reflections unchanged. This is not a generic -3 dB correction.
+    if payload.facade_exclude_building_id is not None:
+        target_building = next((b for b in payload.buildings
+                                if b.id == payload.facade_exclude_building_id and b.enabled), None)
+        if target_building is None:
+            raise HTTPException(status_code=422, detail="Edificio de fachada no encontrado.")
+        audit = facade_geometry_audit(
+            payload.roads[0].points if payload.roads else [],
+            target_building.points, payload.receiver.lat,
+            payload.receiver.lon, payload.receiver.height_m
+        )
+        if payload.facade_exclude_edge_index != audit["facade_edge_index"]:
+            raise HTTPException(status_code=422, detail="La fachada seleccionada no coincide con la geometría del receptor.")
+        if not audit["valid_for_incident_facade_demo"]:
+            raise HTTPException(status_code=422, detail="Receptor exterior no válido para incidencia de fachada: " + "; ".join(audit["warnings"]))
+        facade_name = f"{target_building.name} · fachada {payload.facade_exclude_edge_index}"
+        barriers = [replace(item, reflection_percent=0.0)
+                    if item.name == facade_name else item for item in barriers]
 
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
