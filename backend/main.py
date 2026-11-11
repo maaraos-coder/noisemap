@@ -17,9 +17,11 @@ import ezdxf
 from pyproj import CRS, Transformer
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from noise_app.cnossos_adapter import line_emission_cnossos, SURFACES
+from noise_app.noisemodelling_export import package_scenario
 from noise_app.engine import (
     Barrier,
     PropagationSettings,
@@ -1974,6 +1976,33 @@ class CalculationResponse(BaseModel):
     min_level: Optional[float]
     max_level: Optional[float]
     receiver_results: List[dict] = []
+
+
+class CnossosInterchangeRequest(BaseModel):
+    road: RoadIn
+    traffic_periods: Dict[str, Dict[str, float]]
+    receivers: List[ReceiverIn] = []
+    buildings: List[BuildingIn] = []
+    barriers: List[BarrierIn] = []
+    temperature_c: float = Field(default=20.0, ge=-50.0, le=60.0, allow_inf_nan=False)
+
+
+@app.post("/api/cnossos/export-noisemodelling")
+def export_cnossos_to_noisemodelling(payload: CnossosInterchangeRequest):
+    """GIS interchange package (NOT a computed NoiseModelling scenario)."""
+    try:
+        archive = package_scenario(
+            payload.road, payload.traffic_periods,
+            payload.receivers, payload.buildings, payload.barriers,
+            payload.temperature_c,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=archive, media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="noisemap_cnossos_noisemodelling.zip"',
+                 "X-CNOSSOS-Propagation": "not-computed"},
+    )
 
 
 class CnossosRoadEmissionRequest(BaseModel):
