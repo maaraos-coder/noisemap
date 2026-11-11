@@ -22,6 +22,7 @@ from noise_app.engine import (
 )
 from noise_app.map_view import make_map, rgba_from_grid
 from noise_app.road_scenario import lden, DEFAULT_TRAFFIC, validate_traffic, describe_scope
+from noise_app.cnossos_emission import cnossos_emission_available, calculate_road_emission
 
 
 st.set_page_config(
@@ -779,6 +780,34 @@ with tab_road:
                     key=f"nm_road_{period}_{vehicle}"
                 )
     validate_traffic(flow_data)
+    st.markdown("#### 3 · Emisión vial espectral CNOSSOS-EU (sección 2.2)")
+    ready, availability_message=cnossos_emission_available()
+    if not ready:
+        st.warning(availability_message)
+    else:
+        st.success(availability_message)
+        st.caption("Coeficientes F-1 y F-4 revisados en 2021/1226. Estos son niveles de POTENCIA por metro de vía, NO niveles de presión en el receptor.")
+    if st.button("Calcular emisión vial por bandas",disabled=not ready,key="nm_cnossos_emission_calculate"):
+        try:
+            spectra=calculate_road_emission(flow_data,speed,slope,
+                                            temperature_c=20.0,
+                                            surface="reference road surface")
+            st.session_state["nm_cnossos_emission_results"]=spectra
+        except Exception as exc:
+            st.error(f"No se pudo calcular emisión CNOSSOS-EU: {exc}")
+    stored_emission=st.session_state.get("nm_cnossos_emission_results")
+    if stored_emission and ready:
+        rows=[]
+        for period,values in stored_emission.items():
+            for freq,band in zip(values["frequencies_hz"],values["line_power_db_per_m"]):
+                rows.append({"Período":period,"Frecuencia (Hz)":freq,"Lw' (dB re 1 pW/m)":band})
+        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+        st.caption("La emisión se actualiza al pulsar Calcular. Si modificas flujos, velocidad o pendiente, recalcula.")
+        st.download_button("Descargar emisión CNOSSOS-EU (JSON)",
+            data=json.dumps(stored_emission,ensure_ascii=False,indent=2).encode("utf-8"),
+            file_name="chimbote_cnossos_emision_vial.json",mime="application/json",
+            key="nm_cnossos_emission_export")
+    st.info("**Falta propagación CNOSSOS-EU sección 2.5**: geometría lineal segmentada, suelo, meteorología, reflexión/difracción y edificios. No utilizar Lw' como Lday, Levening o Lnight.")
     st.markdown("#### 3 · Niveles de período obtenidos de una modelación acústica")
     st.info(describe_scope())
     enable_levels=st.checkbox("Dispongo de Lday, Levening y Lnight calculados para este receptor",
