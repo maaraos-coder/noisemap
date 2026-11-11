@@ -4878,3 +4878,35 @@ select {
     padding: 7px 10px;
   }
 }
+
+/* Road instructions are part of the bottom toolbar, rather than hidden behind it. */
+.object-toolbar-road-instruction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 14px 9px;
+  background: #12344f;
+  color: #f8fafc;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.object-toolbar-road-instruction strong {
+  color: #ffffff;
+  font-size: 13px;
+}
+.object-toolbar-road-instruction span {
+  color: #d8eafe;
+}
+@media (max-width: 900px) {
+  .object-toolbar-road-instruction {
+    position: sticky;
+    left: 0;
+    font-size: 11px;
+    padding: 8px 10px;
+  }
+}
