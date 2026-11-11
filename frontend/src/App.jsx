@@ -1359,7 +1359,6 @@ function App() {
     limit_distance: true,
     convex_path: true,
     reflection_order: 'first',
-    facade_1m: true,
     reflector_size_check: true
   })
 
