@@ -69,10 +69,22 @@ CNOSSOS_ROAD_F1 = {
         (91.7, 96.2, 98.2, 104.9, 105.1, 98.5, 91.1, 85.6),
         (30.0, 33.5, 31.3, 25.4, 31.8, 37.1, 38.6, 40.6),
         (108.8, 104.2, 103.5, 102.9, 102.6, 98.5, 93.8, 87.5),
-        (0.0, 3.0, 4.6, 5.0, 5.0, 5.0, 5.0, 5.0),
+        (0.0, 3.0, 4.6, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0),
+    ),
+    # Table F-1 of Directive (EU) 2021/1226. Motorcycles/mopeds:
+    # propulsion only, no rolling-noise contribution.
+    "4a": (
+        (0.0,) * 8, (0.0,) * 8,
+        (93.0, 93.0, 93.5, 95.3, 97.2, 100.4, 95.8, 90.9),
+        (4.2, 7.4, 9.8, 11.6, 15.7, 18.9, 20.3, 20.6),
+    ),
+    "4b": (
+        (0.0,) * 8, (0.0,) * 8,
+        (99.9, 101.9, 96.7, 94.4, 95.2, 94.7, 92.1, 88.6),
+        (3.2, 5.9, 11.9, 11.6, 11.5, 12.6, 11.1, 12.0),
     ),
 }
-CNOSSOS_TEMP_K = {"1": 0.08, "2": 0.04, "3": 0.04}
+CNOSSOS_TEMP_K = {"1": 0.08, "2": 0.04, "3": 0.04, "4a": 0.0, "4b": 0.0}
 CNOSSOS_REF_SPEED = 70.0
 CNOSSOS_SOURCE_HEIGHT_M = 0.05
 
@@ -1042,6 +1054,10 @@ class RoadIn(BaseModel):
     speed_light_kmh: float = Field(default=50.0, gt=0.0)
     speed_medium_kmh: float = Field(default=50.0, gt=0.0)
     speed_heavy_kmh: float = Field(default=50.0, gt=0.0)
+    q_moped_vph: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    q_motorcycle_vph: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    speed_moped_kmh: float = Field(default=40.0, gt=0.0, allow_inf_nan=False)
+    speed_motorcycle_kmh: float = Field(default=50.0, gt=0.0, allow_inf_nan=False)
 
 
 class BarrierIn(BaseModel):
@@ -1782,6 +1798,8 @@ def _cnossos_vehicle_spectrum(category: str, speed_kmh: float, temperature_c: fl
         + np.asarray(bp, dtype=float) * ((v - CNOSSOS_REF_SPEED) / CNOSSOS_REF_SPEED)
     )
 
+    if category in ("4a", "4b"):
+        return propulsion  # Only propulsion is defined for category 4.
     energy = np.power(10.0, rolling / 10.0) + np.power(10.0, propulsion / 10.0)
     return 10.0 * np.log10(energy)
 
@@ -1791,6 +1809,8 @@ def _cnossos_road_line_spectrum(road: RoadIn, temperature_c: float) -> np.ndarra
         ("1", road.q_light_vph, road.speed_light_kmh),
         ("2", road.q_medium_vph, road.speed_medium_kmh),
         ("3", road.q_heavy_vph, road.speed_heavy_kmh),
+        ("4a", road.q_moped_vph, road.speed_moped_kmh),
+        ("4b", road.q_motorcycle_vph, road.speed_motorcycle_kmh),
     )
     category_lines = []
     for category, q, speed in flows:
