@@ -1380,6 +1380,8 @@ function App() {
   const [roadLdenLoading, setRoadLdenLoading] = useState(false)
   const [roadLdenError, setRoadLdenError] = useState('')
   const [roadLdenReceiverId, setRoadLdenReceiverId] = useState('')
+  const [roadEmissionResult, setRoadEmissionResult] = useState(null)
+  const [roadEmissionLoading, setRoadEmissionLoading] = useState(false)
 
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -2333,6 +2335,13 @@ function App() {
       q_motorcycle_vph: 0,
       speed_moped_kmh: 40,
       speed_motorcycle_kmh: 50,
+      road_surface: 'reference road surface',
+      road_slope_percent: 0,
+      road_two_way: true,
+      studded_fraction: 0,
+      studded_months: 0,
+      junction_type: 'none',
+      junction_chainage_m: null,
       speed_light_kmh: 50,
       speed_medium_kmh: 50,
       speed_heavy_kmh: 50
@@ -3580,7 +3589,7 @@ function App() {
         setSelected(null);setSelectedAuxiliaryId(item.id);setAuxiliaryDraft([])
         return
       }
-      const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,q_moped_vph:0,q_motorcycle_vph:0,speed_moped_kmh:40,speed_motorcycle_kmh:50,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
+      const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,q_moped_vph:0,q_motorcycle_vph:0,speed_moped_kmh:40,speed_motorcycle_kmh:50,road_surface:'reference road surface',road_slope_percent:0,road_two_way:true,studded_fraction:0,studded_months:0,junction_type:'none',junction_chainage_m:null,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
       if(type==='source'||type==='receiver') {base.lat=o.points[0][0];base.lon=o.points[0][1];base.height_mode='specify';delete base.points}
       if(type==='accessory') {
         groups.accessory.push({id:base.id,name:base.name,kind:'measurement',lat_a:o.points[0][0],lon_a:o.points[0][1],lat_b:o.points[1][0],lon_b:o.points[1][1],height_m:0})
@@ -3617,6 +3626,25 @@ function App() {
       setAccessories(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    }
+  }
+
+  const calculateRoadEmission = async () => {
+    if (selected?.type !== 'road' || !selectedObject) return
+    setRoadEmissionLoading(true)
+    setRoadEmissionResult(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/cnossos/road-emission`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({road:selectedObject,temperature_c:globalSettings.temperature_c})
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || `Error HTTP ${res.status}`)
+      setRoadEmissionResult({...data,road_id:selectedObject.id})
+    } catch(error) {
+      setRoadEmissionResult({road_id:selectedObject.id,error:error.message})
+    } finally {
+      setRoadEmissionLoading(false)
     }
   }
 
@@ -3690,13 +3718,22 @@ function App() {
       setRoadLdenResult({
         schema_version:1,
         project:'Edificio Chimbote · Curso 5 Laboratorio 2',
-        method:'Emisión vial CNOSSOS-EU 2.2 (categorías 1–4b, superficie de referencia, sin correcciones de pendiente/aceleración) + propagación exterior educativa NoiseMap; NO CNOSSOS-EU 2.5 completo',
+        method:'Emisión vial CNOSSOS-EU 2.2 íntegra mediante phonometry (categorías 1–4b, pavimento, pendiente, neumáticos, intersección) + propagación exterior docente NoiseMap, NO CNOSSOS-EU 2.5',
         normative:false,
         road_id:selectedObject.id, road_name:selectedObject.name,
         road_points:selectedObject.points,
         receiver_id:receiver.id, receiver_name:receiver.name,
         receiver_location:{lat:receiver.lat,lon:receiver.lon,height_m:receiver.height_m},
         hourly_traffic:flows,
+        road_emission_settings:{
+          surface:selectedObject.road_surface || 'reference road surface',
+          slope_percent:selectedObject.road_slope_percent ?? 0,
+          two_way:selectedObject.road_two_way ?? true,
+          studded_fraction:selectedObject.studded_fraction ?? 0,
+          studded_months:selectedObject.studded_months ?? 0,
+          junction_type:selectedObject.junction_type || 'none',
+          junction_chainage_m:selectedObject.junction_chainage_m ?? null,
+        },
         speed_kmh:{
           light:selectedObject.speed_light_kmh,
           medium:selectedObject.speed_medium_kmh,
@@ -3708,7 +3745,7 @@ function App() {
         receiver_period_levels_dba:entries,
         lden_dba:value === null ? null : Math.round(value*100)/100,
         periods_hours:{day:12,evening:4,night:8},
-        omitted:['Propagación normativa CNOSSOS 2.5','Validación integral con casos de referencia','Correcciones por pendiente, pavimento, intersecciones y neumáticos'],
+        omitted:['Propagación normativa CNOSSOS-EU 2.5','Validación integral del Lden receptor con casos de referencia','Condiciones meteorológicas anuales reglamentarias'],
         created_at:new Date().toISOString()
       })
     } catch(e) {
@@ -6391,8 +6428,77 @@ function App() {
                 ).toFixed(0)} veh/h</strong>
               </div>
 
+              <h4 className="subheading">Parámetros de emisión · CNOSSOS-EU 2.2</h4>
+              <label>Superficie vial · tabla F-4
+                <select value={selectedObject.road_surface || 'reference road surface'}
+                  onChange={e=>{patchSelected({road_surface:e.target.value});setRoadEmissionResult(null);setRoadLdenResult(null)}}>
+                  {[
+                    'reference road surface','1-layer ZOAB','2-layer ZOAB','2-layer ZOAB (fine)',
+                    'SMA-NL5','SMA-NL8','brushed down concrete',
+                    'optimised brushed down concrete','fine broomed concrete','worked surface',
+                    'hard elements in herringbone','hard elements not in herringbone',
+                    'quiet hard elements','thin layer A','thin layer B'
+                  ].map(v=><option value={v} key={v}>{v}</option>)}
+                </select>
+              </label>
+              <div className="road-lden-fields">
+                <label>Pendiente longitudinal [%] (- bajada, + subida)
+                  <input type="number" min="-12" max="12" step="0.5"
+                    value={selectedObject.road_slope_percent ?? 0}
+                    onChange={e=>patchSelected({road_slope_percent:Math.max(-12,Math.min(12,Number(e.target.value)||0))})} />
+                </label>
+                <label>Meses con neumáticos con clavos [0–12]
+                  <input type="number" min="0" max="12" step="1" value={selectedObject.studded_months ?? 0}
+                    onChange={e=>patchSelected({studded_months:Math.max(0,Math.min(12,Number(e.target.value)||0))})} />
+                </label>
+                <label>Proporción livianos con clavos [0–1]
+                  <input type="number" min="0" max="1" step="0.05" value={selectedObject.studded_fraction ?? 0}
+                    onChange={e=>patchSelected({studded_fraction:Math.max(0,Math.min(1,Number(e.target.value)||0))})} />
+                </label>
+              </div>
+              <label className="road-two-way">
+                <input type="checkbox" checked={selectedObject.road_two_way ?? true}
+                  onChange={e=>patchSelected({road_two_way:e.target.checked})} />
+                Doble sentido: dividir flujos y evaluar pendiente en ambas direcciones
+              </label>
+              <label>Intersección señalizada / rotonda · tabla F-3
+                <select value={selectedObject.junction_type || 'none'}
+                  onChange={e=>patchSelected({junction_type:e.target.value})}>
+                  <option value="none">Sin intersección modelada</option>
+                  <option value="crossing">Cruce con semáforo</option>
+                  <option value="roundabout">Rotonda</option>
+                </select>
+              </label>
+              {selectedObject.junction_type && selectedObject.junction_type !== 'none' && (
+                <label>Distancia desde el inicio de la vía al centro del cruce [m]
+                  <input type="number" min="0" step="1"
+                    value={selectedObject.junction_chainage_m ?? ''}
+                    placeholder="Definir posición de cruce"
+                    onChange={e=>patchSelected({junction_chainage_m:e.target.value===''?null:Math.max(0,Number(e.target.value)||0)})} />
+                </label>
+              )}
+              {selectedObject.junction_type !== 'none' && selectedObject.junction_chainage_m == null && (
+                <p className="road-lden-help">Selecciona la posición del cruce sobre el eje; sin ella no se aplica la corrección F-3.</p>
+              )}
+              <button type="button" className="road-lden-calc" disabled={roadEmissionLoading}
+                onClick={calculateRoadEmission}>
+                {roadEmissionLoading ? 'Calculando emisión...' : 'Consultar potencia de emisión CNOSSOS-EU'}
+              </button>
+              {roadEmissionResult && roadEmissionResult.road_id===selectedObject.id && (
+                <div className="road-lden-results">
+                  {roadEmissionResult.error ? <p role="alert">{roadEmissionResult.error}</p> : <>
+                    <strong>Potencia lineal Lw,A′: {roadEmissionResult.lwa_db_per_m == null ? 'Sin flujo' : `${roadEmissionResult.lwa_db_per_m.toFixed(1)} dB(A)/m`}</strong>
+                    <p>Por octavas: {Object.entries(roadEmissionResult.bands_db_per_m||{})
+                      .map(([freq,db])=>`${freq} Hz: ${db==null?'—':db.toFixed(1)}`).join(' · ')}</p>
+                    <button type="button" onClick={()=>downloadJsonFile(roadEmissionResult,'cnossos_emision_vial_octavas.json')}>
+                      Exportar espectro JSON
+                    </button>
+                  </>}
+                </div>
+              )}
               <div className="engine-note">
-                Emisión vial CNOSSOS-EU para categorías 1, 2, 3, 4a y 4b en bandas de octava (63 Hz–8 kHz), sobre pavimento de referencia. La propagación exterior sigue siendo educativa: NO implementa CNOSSOS-EU 2.5 completo.
+                Emisión vial conforme a CNOSSOS-EU 2.2 (phonometry, tablas F-1 a F-4);
+                la propagación exterior en receptores sigue siendo educativa y NO implementa CNOSSOS-EU 2.5.
               </div>
               <h4 className="subheading">Lden de tránsito · tres períodos</h4>
               <p className="road-lden-help">Datos supuestos para Pasaje Chimbote. Son flujos medios horarios, NO aforos reales. La velocidad de cada categoría se define arriba.</p>
