@@ -4910,3 +4910,19 @@ select {
     padding: 8px 10px;
   }
 }
+
+/* Curso 5 - CNOSSOS emission + three-period receiver Lden (educational) */
+.road-lden-help{font-size:11px;line-height:1.5;color:#4d6276;margin:8px 0 10px}
+.road-lden-period{margin:9px 0;padding:9px;border:1px solid #cbd9e7;border-radius:8px;background:#f5f9ff}
+.road-lden-period>strong{display:block;font-size:12px;color:#15395b;margin-bottom:6px}
+.road-lden-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.road-lden-fields label{display:flex;flex-direction:column;gap:4px;font-size:10px;color:#456178;min-width:0}
+.road-lden-fields input{width:100%;min-width:0;padding:6px;border:1px solid #b8cad9;border-radius:6px;background:#fff}
+.road-lden-calc,.road-lden-results button{display:block;width:100%;border:0;border-radius:8px;background:#0866c5;color:white;font-weight:750;padding:10px;margin-top:10px;cursor:pointer}
+.road-lden-calc:disabled{opacity:.55;cursor:not-allowed}
+.road-lden-results{margin-top:12px;padding:10px;background:#eff9f4;border:1px solid #a1d6bb;border-radius:8px}
+.road-lden-results>span{display:block;font-size:12px;padding:3px 0;color:#1c4b3a}
+.road-lden-total{font-weight:850;color:#074b33;font-size:17px;margin-top:7px}
+.road-lden-results p{font-size:11px;line-height:1.5;color:#92501a}
+.road-lden-error{font-size:12px;color:#a91a1a;background:#fff0f0;border:1px solid #ffcbcb;padding:8px;border-radius:6px;margin-top:8px}
+@media(max-width:430px){.road-lden-fields{grid-template-columns:1fr 1fr}.road-lden-fields label:last-child{grid-column:span 2}}
