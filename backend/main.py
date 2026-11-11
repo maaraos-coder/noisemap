@@ -2403,8 +2403,20 @@ def receiver_preview(payload: ReceiverPreviewRequest):
         if not audit["valid_for_incident_facade_demo"]:
             raise HTTPException(status_code=422, detail="Receptor exterior no válido para incidencia de fachada: " + "; ".join(audit["warnings"]))
         facade_name = f"{target_building.name} · fachada {payload.facade_exclude_edge_index}"
-        barriers = [replace(item, reflection_percent=0.0)
-                    if item.name == facade_name else item for item in barriers]
+        target_a = target_building.points[payload.facade_exclude_edge_index - 1]
+        target_b = target_building.points[
+            payload.facade_exclude_edge_index % len(target_building.points)
+        ]
+        def is_own_wall(item):
+            return (
+                item.name == facade_name
+                and abs(item.lat_a - float(target_a[0])) < 1e-8
+                and abs(item.lon_a - float(target_a[1])) < 1e-8
+                and abs(item.lat_b - float(target_b[0])) < 1e-8
+                and abs(item.lon_b - float(target_b[1])) < 1e-8
+            )
+        barriers = [replace(item, reflection_percent=0.0) if is_own_wall(item)
+                    else item for item in barriers]
 
     settings = PropagationSettings(
         alpha_db_per_km=payload.settings.alpha_db_per_km,
