@@ -46,7 +46,7 @@ def test_all_five_categories_contribute_by_energy():
     single = []
     for key, value in all_flows.items():
         single.append(_cnossos_road_line_spectrum(
-            RoadIn(**base, **{key: value},
+            RoadIn(**base, **{k: (value if k == key else 0) for k in all_flows},
                    speed_light_kmh=70, speed_medium_kmh=70,
                    speed_heavy_kmh=70, speed_moped_kmh=70,
                    speed_motorcycle_kmh=70),
