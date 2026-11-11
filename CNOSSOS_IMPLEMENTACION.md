@@ -1,54 +1,58 @@
-# CNOSSOS-EU · integración progresiva en NoiseMap
+# CNOSSOS-EU en NoiseMap · estado técnico comprobable
 
-## Módulo disponible en esta rama
+## Incluido en la rama de integración
 
-La emisión vial de la aplicación admite cinco subcategorías con coeficientes por
-octava (63 Hz a 8 kHz) de la **tabla F-1 de la Directiva Delegada (UE)
-2021/1226**: turismos 1, medianos 2, pesados 3, ciclomotores 4a y
-motocicletas 4b. Las categorías 4a y 4b utilizan **solo emisión de
-propulsión**. Los niveles se suman energéticamente y la potencia por metro se
-convierte a fuentes segmentadas.
+- Emisión **CNOSSOS-EU §2.2** para 1/2/3/4a/4b según tablas F-1 a F-4
+  consolidadas con la Directiva Delegada (UE) 2021/1226. Motor externo:
+  [phonometry](https://github.com/jmrplens/phonometry), licencia MIT, revisión
+  de Git fijada en backend/requirements.txt, Python 3.13.
+- Correcciones por temperatura, pendiente longitudinal, bidireccionalidad
+  (cada mitad con pendiente de signo contrario), pavimento, neumáticos
+  con clavos y cercanía a cruce semaforizado/rotonda. Los parámetros son
+  explícitos en el editor vial.
+- Segmentación del trazado y emisión espectral 63 a 8000 Hz. La corrección
+  por intersección se evalúa usando la distancia de cada segmento al centro
+  del cruce definido por abscisa desde el inicio del trazado.
+- Consulta independiente de Lw′ en dB re 1 pW/m:
+  POST `/api/cnossos/road-emission` (no es nivel de presión).
+- Flujos editables para Lday (12 h), Levening (4 h), Lnight (8 h),
+  acumulación energética Lden 0/5/10 dB y descarga JSON.
+- Intercambio geoespacial: `POST /api/cnossos/export-noisemodelling`
+  genera ZIP con escenario JSON y GeoJSON para tres períodos, edificios,
+  barreras y receptores. Los archivos EPSG:4326 se **deben reproyectar**
+  a un CRS métrico apropiado e importar a la configuración 3D del motor.
+- Pruebas CI de potencia espectral, correcciones, geometrias y build.
 
-Los flujos para día, tarde y noche se editan de forma independiente; el Lden
-aplica 12/4/8 horas y penalizaciones 0/5/10 dB. Las velocidades de cada
-subcategoría son editables. Los valores de Pasaje Chimbote son únicamente
-**supuestos docentes**, nunca datos medidos.
+## NO está terminado: propagación CNOSSOS-EU §2.5
 
-### Limitaciones actuales: NO es una implementación reglamentaria
+Los valores en receptores y los mapas actuales pasan por el motor de
+propagación docente preexistente de NoiseMap. **No constituyen un cálculo
+CNOSSOS-EU §2.5**, aunque las potencias de las fuentes sí se calculen con
+el método de emisión CNOSSOS-EU.
 
-- **Emisión §2.2 incompleta:** pendiente, neumáticos, aceleración en
-  intersecciones, pavimentos diferentes del de referencia y otras
-  correcciones todavía no están implementadas.
-- **Propagación §2.5 no implementada íntegramente:** el motor de receptor
-  actual no sustituye el cálculo CNOSSOS completo de trayectorias
-  homogéneas/favorables, suelo, difracción, reflexiones y meteorología.
-- No hay comparación exhaustiva con los casos de referencia de CNOSSOS-EU,
-  ni cálculo certificado de indicadores anuales, ni modelo completo para
-  ferrocarriles, industria o aeronaves.
-- Los resultados JSON llevan `normative:false` y contienen los supuestos.
+Para resultados de propagación completos se requiere ejecutar el motor
+NoiseModelling (Universite Gustave Eiffel, GPLv3) o uno equivalente,
+reproyectar/georreferenciar DEM y edificaciones, ajustar coberturas de suelo,
+reflectancia, condiciones meteorológicas y trayectorias, y validar con casos
+de referencia antes de etiquetar los mapas como reglamentarios. NoiseModelling
+necesita un servicio Java adicional con suficientes CPU y memoria. Vercel
+aloja el **frontend**, y Render aloja actualmente el backend Python; el ZIP
+exportado NO ejecuta el motor Java ni sustituye la importación a su esquema
+H2/Spatial.
 
-### Para concluir la integración completa
+## Reglas de uso docente
 
-1. Elegir y desplegar un motor especializado de CNOSSOS-EU §2.5, por
-   ejemplo **NoiseModelling** (requiere infraestructura de cálculo propia;
-   Vercel solo aloja el frontend React).
-2. Construir un modelo geométrico 3D consistente de calles, edificios,
-   terreno, receptores, suelo y meteorología, con intercambio GeoJSON
-   y sus parámetros espectrales.
-3. Completar correcciones oficiales de fuente vial y luego los otros
-   tipos de fuente definidos en la normativa.
-4. Verificar emisión y propagación con conjuntos de referencia
-   independientes de la implementación, incluyendo variantes con
-   reflexiones, difracción y suelo.
-5. Activar la opción «CNOSSOS-EU validado» únicamente tras completar y
-   documentar las pruebas; mantener el modo docente separadamente.
+- Pasaje Chimbote: flujos son **supuestos**, no aforos reales.
+- Potencias en dB re 1 pW/m, no confundir con dB(A) de presión de fachada.
+- Para la fachada, ubicar el receptor a la altura exterior de la vivienda
+  elegida y documentar el criterio de reflexión de fachada.
+- Solo etiquetar como regulatorio después de validar geometría,
+  meteorología, emisiones, propagación, periodos de referencia y datos
+  anuales reales. La app conserva `normative:false` en su exportación Lden.
 
-## Referencias
+## Fuentes
 
-- Directiva 2002/49/CE, anexo I, indicadores Lden/Lnight.
-- Directiva (UE) 2015/996, anexo II.
-- Directiva Delegada (UE) 2021/1226, especialmente tabla F-1 y
-  modificaciones del método.
-- NoiseModelling (Université Gustave Eiffel), motor acústico abierto.
-
-No usar esta implementación parcial para demostrar cumplimiento regulatorio.
+- Directiva 2002/49/CE y anexo II reemplazado por (UE) 2015/996.
+- Directiva Delegada (UE) 2021/1226, tablas F-1 / F-4.
+- Documentación API phonometry, `cnossos_road`.
+- NoiseModelling: https://noisemodelling.readthedocs.io/en/latest/
