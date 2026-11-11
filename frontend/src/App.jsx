@@ -3777,7 +3777,7 @@ function App() {
       const value = energy>0 ? 10*Math.log10(energy/24) : null
       setRoadLdenResult({
         schema_version:1,
-        project:'Edificio Chimbote · Curso 5 Laboratorio 2',
+        project:'Escenario de ruido de tránsito',
         method:'Emisión vial CNOSSOS-EU 2.2 íntegra mediante phonometry (categorías 1–4b, pavimento, pendiente, neumáticos, intersección) + propagación exterior docente NoiseMap, NO CNOSSOS-EU 2.5',
         normative:false,
         road_id:selectedObject.id, road_name:selectedObject.name,
@@ -6558,7 +6558,7 @@ function App() {
                 </div>
               )}
               <div className="engine-note">
-                Emisión vial conforme a CNOSSOS-EU 2.2 (phonometry, tablas F-1 a F-4);
+                Emisión vial CNOSSOS-EU §2.2: categorías 1, 2, 3, 4a y 4b (63 Hz–8 kHz), con correcciones configurables de pavimento, pendiente, temperatura e intersecciones;
                 la propagación exterior en receptores sigue siendo educativa y NO implementa CNOSSOS-EU 2.5.
               </div>
               <h4 className="subheading">Intercambio con NoiseModelling · CNOSSOS-EU §2.5</h4>
@@ -6568,7 +6568,7 @@ function App() {
               </button>
               {noisemodellingExportError && <p className="road-lden-error" role="alert">{noisemodellingExportError}</p>}
               <h4 className="subheading">Lden de tránsito · tres períodos</h4>
-              <p className="road-lden-help">Datos supuestos para Pasaje Chimbote. Son flujos medios horarios, NO aforos reales. La velocidad de cada categoría se define arriba.</p>
+              <p className="road-lden-help">Valores iniciales editables de flujo horario por categoría vehicular. Sustitúyelos por datos representativos de tu escenario; los valores iniciales no corresponden a aforos reales. La velocidad de cada categoría se configura arriba.</p>
               {Object.entries({
                 day:{name:'Día · 12 h',defaults:{light:80,medium:3,heavy:1,moped:0,motorcycle:0}},
                 evening:{name:'Tarde · 4 h',defaults:{light:45,medium:1,heavy:0,moped:0,motorcycle:0}},
@@ -6637,8 +6637,8 @@ function App() {
                   <div className="road-lden-total">Lden · {roadLdenResult.lden_dba === null
                     ? 'Sin tráfico' : `${roadLdenResult.lden_dba.toFixed(1)} dB(A)`}</div>
                   <p>Lden incidente en fachada: se excluye la reflexión propia. Modelo académico; NO es CNOSSOS-EU §2.5 validado.</p>
-                  <button type="button" onClick={()=>downloadJsonFile(roadLdenResult,'chimbote_noise_map_lden_no_normativo.json')}>
-                    Exportar JSON para el Diplomado
+                  <button type="button" onClick={()=>downloadJsonFile(roadLdenResult,'noisemap_lden_fachada_estimacion.json')}>
+                    Exportar resultados JSON
                   </button>
                 </div>
               )}
