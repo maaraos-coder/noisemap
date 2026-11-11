@@ -23,6 +23,7 @@ from noise_app.engine import (
 from noise_app.map_view import make_map, rgba_from_grid
 from noise_app.road_scenario import lden, DEFAULT_TRAFFIC, validate_traffic, describe_scope
 from noise_app.cnossos_emission import cnossos_emission_available, calculate_road_emission
+from noise_app.road_receiver_demo import illustrative_free_field_levels
 
 
 st.set_page_config(
@@ -808,7 +809,41 @@ with tab_road:
             file_name="chimbote_cnossos_emision_vial.json",mime="application/json",
             key="nm_cnossos_emission_export")
     st.info("**Falta propagación CNOSSOS-EU sección 2.5**: geometría lineal segmentada, suelo, meteorología, reflexión/difracción y edificios. No utilizar Lw' como Lday, Levening o Lnight.")
-    st.markdown("#### 3 · Niveles de período obtenidos de una modelación acústica")
+    st.markdown("#### 4 · Receptor exterior: estimación docente de espacio libre")
+    st.warning("**Este resultado NO es CNOSSOS-EU completo.** Se utiliza la emisión espectral CNOSSOS-EU y una propagación geométrica de vía recta SIN suelo, barreras, fachadas, reflexiones ni meteorología. Para un Lden CNOSSOS-EU reglamentario hace falta el motor de propagación sección 2.5.")
+    a,b,c=st.columns(3)
+    distance=a.number_input("Distancia horizontal eje vía–receptor [m]",min_value=0.5,
+                            max_value=500.0,value=20.0,step=0.5,key="nm_road_distance")
+    source_length=b.number_input("Longitud de vía representada [m]",min_value=10.0,
+                            max_value=1000.0,value=250.0,step=10.0,key="nm_road_segment")
+    temperature=c.number_input("Temperatura media anual [°C]",min_value=-10.0,
+                            max_value=45.0,value=20.0,step=1.0,key="nm_road_temp")
+    if st.button("Estimar Lden exterior · modelo docente (no normativo)",disabled=not ready,
+                 key="nm_road_preliminary_receiver"):
+        try:
+            estimated=illustrative_free_field_levels(
+                flow_data,speed,distance,height,road_length_m=source_length,
+                slope_percent=slope,temperature_c=temperature)
+            st.session_state["nm_road_preliminary_result"]=estimated
+        except Exception as exc:
+            st.error(f"No fue posible estimar el receptor: {exc}")
+    receiver_result=st.session_state.get("nm_road_preliminary_result")
+    if receiver_result is not None and ready:
+        st.caption("Resultado guardado de la última ejecución; recalcula después de modificar parámetros.")
+        periods=receiver_result["receiver_period_levels_dba"]
+        x1,x2,x3,x4=st.columns(4)
+        for col,key,label in zip((x1,x2,x3),("day","evening","night"),("Lday","Levening","Lnight")):
+            level_value=periods[key]
+            col.metric(label,f"{level_value:.1f} dB(A)" if level_value is not None else "Sin tráfico")
+        lden_pre=receiver_result["lden_dba"]
+        x4.metric("Lden estimado",f"{lden_pre:.1f} dB(A)" if lden_pre is not None else "Sin tráfico")
+        st.error("Etiquetado obligatorio: **estimación académica NO normativa**. No utilizar estos niveles como una predicción CNOSSOS-EU 2.5 validada.")
+        st.download_button("Exportar Lday / Levening / Lnight y Lden estimados (JSON)",
+            data=json.dumps(receiver_result,ensure_ascii=False,indent=2).encode("utf-8"),
+            file_name="chimbote_lden_estimacion_no_normativa.json",
+            mime="application/json",key="nm_road_receiver_export")
+    st.markdown("#### 5 · Niveles de período obtenidos de un modelo documentado")
+
     st.info(describe_scope())
     enable_levels=st.checkbox("Dispongo de Lday, Levening y Lnight calculados para este receptor",
                               key="nm_road_levels_ok")
@@ -837,7 +872,7 @@ with tab_road:
         "receiver":{"name":receptor_name,"height_m":height},
         "periods_hours":{"day":12,"evening":4,"night":8},
         "hourly_traffic":flow_data,
-        "source_method_status":"traffic input only; no CNOSSOS-EU emission/propagation calculated",
+        "source_method_status":"CNOSSOS-EU source emission available separately; full CNOSSOS-EU 2.5 propagation not calculated",
         "model_evidence":method,
         "period_levels_dba":results if enable_levels else None,
         "lden_dba":round(level,2) if level is not None else None,
