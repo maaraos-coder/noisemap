@@ -1376,6 +1376,11 @@ function App() {
   const [receiverPreview, setReceiverPreview] = useState(null)
   const [receiverPreviewLoading, setReceiverPreviewLoading] = useState(false)
   const [receiverPreviewError, setReceiverPreviewError] = useState('')
+  const [roadLdenResult, setRoadLdenResult] = useState(null)
+  const [roadLdenLoading, setRoadLdenLoading] = useState(false)
+  const [roadLdenError, setRoadLdenError] = useState('')
+  const [roadLdenReceiverId, setRoadLdenReceiverId] = useState('')
+
   const [dirty, setDirty] = useState(true)
   const [selected, setSelected] = useState(null)
   useEffect(() => { if (selected) setSelectedAuxiliaryId(null) }, [selected])
@@ -3608,6 +3613,100 @@ function App() {
       setAccessories(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
     } else if (selected.type === 'contour') {
       setContours(prev => prev.map(x => x.id === selected.id ? { ...x, ...patch } : x))
+    }
+  }
+
+  const calculateRoadLden = async () => {
+    if (selected?.type !== 'road' || !selectedObject) return
+    const receiver = receivers.find(item => item.id === roadLdenReceiverId) || receivers[0]
+    if (!receiver) {
+      setRoadLdenError('Primero agrega un receptor exterior sobre la fachada (altura correspondiente al piso estudiado).')
+      return
+    }
+    setRoadLdenLoading(true)
+    setRoadLdenResult(null)
+    setRoadLdenError('')
+    const periods = {
+      day: {hours:12, penalty:0},
+      evening: {hours:4, penalty:5},
+      night: {hours:8, penalty:10}
+    }
+    const flows = selectedObject.traffic_periods || {
+      day: {light:80, medium:3, heavy:1},
+      evening: {light:45, medium:1, heavy:0},
+      night: {light:10, medium:0, heavy:0}
+    }
+    try {
+      const entries = {}
+      for (const period of Object.keys(periods)) {
+        const traffic = flows[period] || {}
+        const road = {
+          ...selectedObject,
+          q_light_vph: Number(traffic.light) || 0,
+          q_medium_vph: Number(traffic.medium) || 0,
+          q_heavy_vph: Number(traffic.heavy) || 0
+        }
+        const res = await fetch(`${API_BASE}/api/receiver-preview`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            sources: [],
+            roads: [road],
+            receiver,
+            barriers,
+            buildings,
+            contours,
+            settings: {
+              resolution,
+              receiver_height_m: receiver.height_m,
+              alpha_db_per_km:alpha,
+              frequency_hz:frequency,
+              vmin,vmax,
+              prediction_model:globalSettings.prediction_model,
+              a_weighting:true,
+              ground_factor:globalSettings.ground_factor,
+              temperature_c:globalSettings.temperature_c,
+              humidity_pct:globalSettings.humidity_pct,
+              c0_db:globalSettings.c0_db,
+              max_barrier_db:globalSettings.barrier_limit ? 20 : 80,
+              reflections_enabled:globalSettings.reflection_order !== 'none'
+            }
+          })
+        })
+        if (!res.ok) throw new Error(`El servidor no respondió al período ${period} (HTTP ${res.status})`)
+        const data = await res.json()
+        entries[period] = Number.isFinite(Number(data.level_db)) && data.level_db !== null
+          ? Number(data.level_db) : null
+      }
+      const energy = Object.entries(periods).reduce((sum,[key,p]) =>
+        sum + (entries[key] === null ? 0 : p.hours * 10 ** ((entries[key]+p.penalty)/10)),0)
+      const value = energy>0 ? 10*Math.log10(energy/24) : null
+      setRoadLdenResult({
+        schema_version:1,
+        project:'Edificio Chimbote · Curso 5 Laboratorio 2',
+        method:'Emisión vial CNOSSOS-EU 2.2 (categorías 1–3) + propagación exterior educativa NoiseMap; NO CNOSSOS-EU 2.5 completo',
+        normative:false,
+        road_id:selectedObject.id, road_name:selectedObject.name,
+        road_points:selectedObject.points,
+        receiver_id:receiver.id, receiver_name:receiver.name,
+        receiver_location:{lat:receiver.lat,lon:receiver.lon,height_m:receiver.height_m},
+        hourly_traffic:flows,
+        speed_kmh:{
+          light:selectedObject.speed_light_kmh,
+          medium:selectedObject.speed_medium_kmh,
+          heavy:selectedObject.speed_heavy_kmh
+        },
+        period_levels_dba:entries,
+        receiver_period_levels_dba:entries,
+        lden_dba:value === null ? null : Math.round(value*100)/100,
+        periods_hours:{day:12,evening:4,night:8},
+        omitted:['Propagación normativa CNOSSOS 2.5','Validación con caso de referencia','Categorías de motocicletas 4a/4b'],
+        created_at:new Date().toISOString()
+      })
+    } catch(e) {
+      setRoadLdenError(e.message || 'No se pudo calcular el nivel de tránsito.')
+    } finally {
+      setRoadLdenLoading(false)
     }
   }
 
@@ -6271,8 +6370,62 @@ function App() {
               </div>
 
               <div className="engine-note">
-                Emisión por octavas 63 Hz–8 kHz según CNOSSOS-EU, con fuente equivalente a 0,05 m sobre la calzada. La propagación utiliza el motor exterior educativo actual.
+                Emisión CNOSSOS-EU para categorías 1–3 por octavas (63 Hz–8 kHz); propagación exterior educativa. **No implementa CNOSSOS-EU 2.5 completo ni motocicletas 4a/4b.**
               </div>
+              <h4 className="subheading">Lden de tránsito · tres períodos</h4>
+              <p className="road-lden-help">Datos supuestos para Pasaje Chimbote. Son flujos medios horarios, NO aforos reales. La velocidad de cada categoría se define arriba.</p>
+              {Object.entries({
+                day:{name:'Día · 12 h',defaults:{light:80,medium:3,heavy:1}},
+                evening:{name:'Tarde · 4 h',defaults:{light:45,medium:1,heavy:0}},
+                night:{name:'Noche · 8 h',defaults:{light:10,medium:0,heavy:0}}
+              }).map(([period,info])=>(
+                <div key={period} className="road-lden-period">
+                  <strong>{info.name}</strong>
+                  <div className="road-lden-fields">
+                    {Object.entries({light:'Livianos/h',medium:'Medianos/h',heavy:'Pesados/h'}).map(([cat,label])=>(
+                      <label key={cat}>{label}
+                        <input type="number" min="0" step="1"
+                          value={selectedObject.traffic_periods?.[period]?.[cat] ?? info.defaults[cat]}
+                          onChange={event=>{
+                            const base=selectedObject.traffic_periods || {}
+                            patchSelected({traffic_periods:{
+                              ...base,
+                              [period]:{...info.defaults,...base[period],[cat]:Math.max(0,Number(event.target.value)||0)}
+                            }})
+                            setRoadLdenResult(null)
+                          }}/>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <label>Receptor exterior para el cálculo Lden</label>
+              <select value={roadLdenReceiverId || receivers[0]?.id || ''}
+                onChange={event=>setRoadLdenReceiverId(event.target.value)}>
+                {receivers.length === 0 && <option value="">Añade primero un receptor en el mapa</option>}
+                {receivers.map(receiver=>(
+                  <option key={receiver.id} value={receiver.id}>{receiver.name} · h={Number(receiver.height_m).toFixed(1)} m</option>
+                ))}
+              </select>
+              <button type="button" className="road-lden-calc" disabled={roadLdenLoading || !receivers.length}
+                onClick={calculateRoadLden}>
+                {roadLdenLoading ? 'Calculando Lday, Levening y Lnight…' : 'Calcular Lden en receptor'}
+              </button>
+              {roadLdenError && <div className="road-lden-error" role="alert">{roadLdenError}</div>}
+              {roadLdenResult && roadLdenResult.road_id === selectedObject.id && (
+                <div className="road-lden-results">
+                  {Object.entries({day:'Lday',evening:'Levening',night:'Lnight'}).map(([key,label])=>(
+                    <span key={key}>{label}: <strong>{roadLdenResult.period_levels_dba[key] === null
+                      ? 'Sin emisión' : `${roadLdenResult.period_levels_dba[key].toFixed(1)} dB(A)`}</strong></span>
+                  ))}
+                  <div className="road-lden-total">Lden · {roadLdenResult.lden_dba === null
+                    ? 'Sin tráfico' : `${roadLdenResult.lden_dba.toFixed(1)} dB(A)`}</div>
+                  <p>Estimación académica; **NO** predicción CNOSSOS-EU 2.5 normativa.</p>
+                  <button type="button" onClick={()=>downloadJsonFile(roadLdenResult,'chimbote_noise_map_lden_no_normativo.json')}>
+                    Exportar JSON para el Diplomado
+                  </button>
+                </div>
+              )}
             </>
           )}
 
