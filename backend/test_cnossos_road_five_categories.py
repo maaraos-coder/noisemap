@@ -67,3 +67,9 @@ def test_zero_traffic_does_not_create_sound():
                   q_light_vph=0, q_medium_vph=0, q_heavy_vph=0,
                   q_moped_vph=0, q_motorcycle_vph=0)
     assert np.all(np.isneginf(_cnossos_road_line_spectrum(road, 20)))
+
+
+def test_appendix_f1_all_category_arrays_are_eight_octaves():
+    assert set(CNOSSOS_ROAD_F1) == {'1','2','3','4a','4b'}
+    for coefficients in CNOSSOS_ROAD_F1.values():
+        assert all(len(row) == 8 for row in coefficients)
