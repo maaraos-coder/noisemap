@@ -23,7 +23,7 @@ from noise_app.engine import (
 from noise_app.map_view import make_map, rgba_from_grid
 from noise_app.road_scenario import lden, DEFAULT_TRAFFIC, validate_traffic, describe_scope
 from noise_app.cnossos_emission import cnossos_emission_available, calculate_road_emission
-from noise_app.road_receiver_demo import illustrative_free_field_levels
+from noise_app.road_receiver_demo import illustrative_free_field_levels, illustrative_lden_grid
 
 
 st.set_page_config(
@@ -847,6 +847,29 @@ with tab_road:
             data=json.dumps(receiver_result,ensure_ascii=False,indent=2).encode("utf-8"),
             file_name="chimbote_lden_estimacion_no_normativa.json",
             mime="application/json",key="nm_road_receiver_export")
+    st.markdown("#### Mapa esquemático Lden · propagación libre ilustrativa")
+    st.caption("Vía recta horizontal situada en y=0; el mapa abarca hasta 100 m perpendiculares. No es georreferenciado y no aplica el método de propagación CNOSSOS-EU 2.5.")
+    if st.button("Generar mapa Lden ilustrativo",disabled=(not ready or emission_surface is None),
+                 key="nm_road_illustrative_grid"):
+        try:
+            raster=illustrative_lden_grid(
+                flow_data,speed,receiver_height_m=height,
+                road_length_m=source_length,cross_road_extent_m=100.0,
+                slope_percent=slope,temperature_c=temperature,
+                surface=emission_surface)
+            st.session_state["nm_road_illustrative_map"]=raster
+        except Exception as exc:
+            st.error(f"No fue posible generar el mapa didáctico: {exc}")
+    map_data=st.session_state.get("nm_road_illustrative_map")
+    if map_data is not None and ready:
+        from PIL import Image
+        rgba=rgba_from_grid(map_data["levels_dba"],35.0,75.0)
+        st.image(Image.fromarray(rgba).resize((720,560)),
+                 caption="Lden ilustrativo · escala visual 35–75 dB(A). "
+                         "Zona inferior: vía; zona superior: mayor distancia. "
+                         "Aún NO corresponde a CNOSSOS-EU completo.",
+                 use_container_width=True)
+        st.warning("Este raster es esquemático, NO representa la ubicación real, edificios ni reflexiones del Pasaje Chimbote.")
     st.markdown("#### 5 · Niveles de período obtenidos de un modelo documentado")
 
     st.info(describe_scope())
