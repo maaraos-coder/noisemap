@@ -11,9 +11,9 @@ from typing import Mapping
 
 PERIODS = {"day": (12, 0), "evening": (4, 5), "night": (8, 10)}
 DEFAULT_TRAFFIC = {
-    "day": {"light": 650, "medium": 35, "heavy": 15, "motorcycles": 30},
-    "evening": {"light": 400, "medium": 20, "heavy": 8, "motorcycles": 20},
-    "night": {"light": 110, "medium": 5, "heavy": 2, "motorcycles": 5},
+    "day": {"light": 80, "medium": 3, "heavy": 1, "motorcycles": 7},
+    "evening": {"light": 45, "medium": 1, "heavy": 0, "motorcycles": 4},
+    "night": {"light": 10, "medium": 0, "heavy": 0, "motorcycles": 1},
 }
 
 def lden(lday: float, levening: float, lnight: float) -> float:
