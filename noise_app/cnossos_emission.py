@@ -7,7 +7,7 @@ spectral source-line power IS NOT a sound pressure level at a facade.
 from __future__ import annotations
 import math
 
-CATEGORIES = {"light": "1", "medium": "2", "heavy": "3", "motorcycles": "4b"}
+CATEGORIES = {"light": "LIGHT", "medium": "MEDIUM_HEAVY", "heavy": "HEAVY", "motorcycles": "MOTORCYCLES"}
 BANDS = (63, 125, 250, 500, 1000, 2000, 4000, 8000)
 
 def cnossos_emission_available() -> tuple[bool,str]:
@@ -28,7 +28,6 @@ def calculate_road_emission(period_flows: dict, speed_kmh: float,
     category or a zero flow contributes nothing. Output is eight octave bands.
     The result cannot be used as Lday/Levening/Lnight without propagation.
     """
-    import numpy as np
     from phonometry.environment.sources.cnossos_road import road_source_power, RoadTraffic, RoadVehicleCategory
     if not (math.isfinite(speed_kmh) and speed_kmh > 0):
         raise ValueError("La velocidad debe ser positiva y finita.")
@@ -41,7 +40,7 @@ def calculate_road_emission(period_flows: dict, speed_kmh: float,
             if not math.isfinite(q) or q < 0:
                 raise ValueError(f"Flujo inválido para {label}: {q}")
             if q:
-                streams.append(RoadTraffic(category=RoadVehicleCategory(category),
+                streams.append(RoadTraffic(category=getattr(RoadVehicleCategory,category),
                                            flow_rate=q,speed_kmh=float(speed_kmh)))
         if streams:
             value=road_source_power(streams, surface=surface,
