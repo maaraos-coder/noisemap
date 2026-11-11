@@ -6627,7 +6627,7 @@ function App() {
                 <span>Hacia la calle: <strong>{roadFacadeAudit.receiver_street_side?'Sí':'No'}</strong></span>
                 {roadFacadeAudit.warnings?.map((warning,index)=><p key={index}>{warning}</p>)}
               </div>}
-              {roadLdenError && <div className="road-lden-error" role="alert">{roadLdenError}</div>
+              {roadLdenError && <div className="road-lden-error" role="alert">{roadLdenError}</div>}
               {roadLdenResult && roadLdenResult.road_id === selectedObject.id && (
                 <div className="road-lden-results">
                   {Object.entries({day:'Lday',evening:'Levening',night:'Lnight'}).map(([key,label])=>(
