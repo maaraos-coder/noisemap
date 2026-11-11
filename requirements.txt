@@ -7,5 +7,5 @@ branca>=0.8,<1
 pillow>=11,<13
 pytest>=8,<9
 
-# CNOSSOS-EU road-source emission; requires Python >=3.12
-phonometry; python_version >= '3.12'
+# CNOSSOS-EU source emission (v4 API); preview release requires Python >=3.13
+phonometry==4.0.0rc1; python_version >= '3.13'
