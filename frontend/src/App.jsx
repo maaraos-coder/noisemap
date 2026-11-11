@@ -2329,6 +2329,10 @@ function App() {
       q_light_vph: 800,
       q_medium_vph: 40,
       q_heavy_vph: 30,
+      q_moped_vph: 0,
+      q_motorcycle_vph: 0,
+      speed_moped_kmh: 40,
+      speed_motorcycle_kmh: 50,
       speed_light_kmh: 50,
       speed_medium_kmh: 50,
       speed_heavy_kmh: 50
@@ -3576,7 +3580,7 @@ function App() {
         setSelected(null);setSelectedAuxiliaryId(item.id);setAuxiliaryDraft([])
         return
       }
-      const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
+      const base={enabled:true,visible:true,reflection_percent:0,height_mode:'specify',lw_db:100,dc_db:0,spectrum_mode:'broadband',single_frequency_hz:500,octave_levels:{},adjust_db:0,time_active_pct:100,noise_control_type:'none',q_light_vph:800,q_medium_vph:40,q_heavy_vph:30,q_moped_vph:0,q_motorcycle_vph:0,speed_moped_kmh:40,speed_motorcycle_kmh:50,speed_light_kmh:50,speed_medium_kmh:50,speed_heavy_kmh:50,receiver_start_height_m:1.5,receiver_spacing_m:3,receiver_offset_m:1,...o,id:o.id||crypto.randomUUID()}
       if(type==='source'||type==='receiver') {base.lat=o.points[0][0];base.lon=o.points[0][1];base.height_mode='specify';delete base.points}
       if(type==='accessory') {
         groups.accessory.push({id:base.id,name:base.name,kind:'measurement',lat_a:o.points[0][0],lon_a:o.points[0][1],lat_b:o.points[1][0],lon_b:o.points[1][1],height_m:0})
@@ -3632,9 +3636,9 @@ function App() {
       night: {hours:8, penalty:10}
     }
     const flows = selectedObject.traffic_periods || {
-      day: {light:80, medium:3, heavy:1},
-      evening: {light:45, medium:1, heavy:0},
-      night: {light:10, medium:0, heavy:0}
+      day: {light:80, medium:3, heavy:1, moped:0, motorcycle:0},
+      evening: {light:45, medium:1, heavy:0, moped:0, motorcycle:0},
+      night: {light:10, medium:0, heavy:0, moped:0, motorcycle:0}
     }
     try {
       const entries = {}
@@ -3644,7 +3648,9 @@ function App() {
           ...selectedObject,
           q_light_vph: Number(traffic.light) || 0,
           q_medium_vph: Number(traffic.medium) || 0,
-          q_heavy_vph: Number(traffic.heavy) || 0
+          q_heavy_vph: Number(traffic.heavy) || 0,
+          q_moped_vph: Number(traffic.moped) || 0,
+          q_motorcycle_vph: Number(traffic.motorcycle) || 0
         }
         const res = await fetch(`${API_BASE}/api/receiver-preview`, {
           method: 'POST',
@@ -3684,7 +3690,7 @@ function App() {
       setRoadLdenResult({
         schema_version:1,
         project:'Edificio Chimbote · Curso 5 Laboratorio 2',
-        method:'Emisión vial CNOSSOS-EU 2.2 (categorías 1–3) + propagación exterior educativa NoiseMap; NO CNOSSOS-EU 2.5 completo',
+        method:'Emisión vial CNOSSOS-EU 2.2 (categorías 1–4b, superficie de referencia, sin correcciones de pendiente/aceleración) + propagación exterior educativa NoiseMap; NO CNOSSOS-EU 2.5 completo',
         normative:false,
         road_id:selectedObject.id, road_name:selectedObject.name,
         road_points:selectedObject.points,
@@ -3694,13 +3700,15 @@ function App() {
         speed_kmh:{
           light:selectedObject.speed_light_kmh,
           medium:selectedObject.speed_medium_kmh,
-          heavy:selectedObject.speed_heavy_kmh
+          heavy:selectedObject.speed_heavy_kmh,
+          moped:selectedObject.speed_moped_kmh ?? 40,
+          motorcycle:selectedObject.speed_motorcycle_kmh ?? 50
         },
         period_levels_dba:entries,
         receiver_period_levels_dba:entries,
         lden_dba:value === null ? null : Math.round(value*100)/100,
         periods_hours:{day:12,evening:4,night:8},
-        omitted:['Propagación normativa CNOSSOS 2.5','Validación con caso de referencia','Categorías de motocicletas 4a/4b'],
+        omitted:['Propagación normativa CNOSSOS 2.5','Validación integral con casos de referencia','Correcciones por pendiente, pavimento, intersecciones y neumáticos'],
         created_at:new Date().toISOString()
       })
     } catch(e) {
@@ -6358,6 +6366,18 @@ function App() {
                   <input type="number" min="1" value={selectedObject.speed_heavy_kmh}
                     onChange={e => patchSelected({ speed_heavy_kmh:Math.max(1, Number(e.target.value)) })} />
                 </div>
+                {[
+                  {label:'Ciclomotores · Cat. 4a',flow:'q_moped_vph',speed:'speed_moped_kmh',defaultSpeed:40},
+                  {label:'Motocicletas · Cat. 4b',flow:'q_motorcycle_vph',speed:'speed_motorcycle_kmh',defaultSpeed:50}
+                ].map(category=>(
+                  <div className="road-traffic-row" key={category.flow}>
+                    <span>{category.label}</span>
+                    <input type="number" min="0" value={selectedObject[category.flow] ?? 0}
+                      onChange={e=>patchSelected({[category.flow]:Math.max(0,Number(e.target.value)||0)})}/>
+                    <input type="number" min="1" value={selectedObject[category.speed] ?? category.defaultSpeed}
+                      onChange={e=>patchSelected({[category.speed]:Math.max(1,Number(e.target.value)||1)})}/>
+                  </div>
+                ))}
               </div>
 
               <div className="calculated-field">
@@ -6365,24 +6385,26 @@ function App() {
                 <strong>{(
                   Number(selectedObject.q_light_vph || 0) +
                   Number(selectedObject.q_medium_vph || 0) +
-                  Number(selectedObject.q_heavy_vph || 0)
+                  Number(selectedObject.q_heavy_vph || 0) +
+                  Number(selectedObject.q_moped_vph || 0) +
+                  Number(selectedObject.q_motorcycle_vph || 0)
                 ).toFixed(0)} veh/h</strong>
               </div>
 
               <div className="engine-note">
-                Emisión CNOSSOS-EU para categorías 1–3 por octavas (63 Hz–8 kHz); propagación exterior educativa. **No implementa CNOSSOS-EU 2.5 completo ni motocicletas 4a/4b.**
+                Emisión vial CNOSSOS-EU para categorías 1, 2, 3, 4a y 4b en bandas de octava (63 Hz–8 kHz), sobre pavimento de referencia. La propagación exterior sigue siendo educativa: NO implementa CNOSSOS-EU 2.5 completo.
               </div>
               <h4 className="subheading">Lden de tránsito · tres períodos</h4>
               <p className="road-lden-help">Datos supuestos para Pasaje Chimbote. Son flujos medios horarios, NO aforos reales. La velocidad de cada categoría se define arriba.</p>
               {Object.entries({
-                day:{name:'Día · 12 h',defaults:{light:80,medium:3,heavy:1}},
-                evening:{name:'Tarde · 4 h',defaults:{light:45,medium:1,heavy:0}},
-                night:{name:'Noche · 8 h',defaults:{light:10,medium:0,heavy:0}}
+                day:{name:'Día · 12 h',defaults:{light:80,medium:3,heavy:1,moped:0,motorcycle:0}},
+                evening:{name:'Tarde · 4 h',defaults:{light:45,medium:1,heavy:0,moped:0,motorcycle:0}},
+                night:{name:'Noche · 8 h',defaults:{light:10,medium:0,heavy:0,moped:0,motorcycle:0}}
               }).map(([period,info])=>(
                 <div key={period} className="road-lden-period">
                   <strong>{info.name}</strong>
                   <div className="road-lden-fields">
-                    {Object.entries({light:'Livianos/h',medium:'Medianos/h',heavy:'Pesados/h'}).map(([cat,label])=>(
+                    {Object.entries({light:'Livianos/h',medium:'Medianos/h',heavy:'Pesados/h',moped:'Ciclomotores/h',motorcycle:'Motocicletas/h'}).map(([cat,label])=>(
                       <label key={cat}>{label}
                         <input type="number" min="0" step="1"
                           value={selectedObject.traffic_periods?.[period]?.[cat] ?? info.defaults[cat]}
