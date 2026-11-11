@@ -762,8 +762,11 @@ with tab_road:
                                  value=0.0, step=0.5, key="nm_road_slope")
     height = cols[2].number_input("Altura receptor [m]", min_value=0.1,max_value=100.0,
                                  value=13.0,step=0.5,key="nm_road_height")
-    surface = st.selectbox("Pavimento supuesto", ["Asfalto convencional","Hormigón","Otro / justificar"],
+    surface = st.selectbox("Pavimento supuesto", ["Asfalto convencional","Hormigón cepillado","Otro / justificar"],
                            key="nm_road_surface")
+    emission_surface = {"Asfalto convencional":"reference road surface","Hormigón cepillado":"brushed down concrete"}.get(surface)
+    if emission_surface is None:
+        st.warning("El pavimento elegido no tiene una correspondencia definida con la tabla F-4: selecciona un tipo de pavimento trazable antes de calcular.")
     st.caption("Los valores iniciales son supuestos docentes: no representan aforos reales ni condiciones medidas del pasaje.")
     st.markdown("#### 2 · Flujos horarios supuestos")
     tcols=st.columns(3)
@@ -788,11 +791,11 @@ with tab_road:
     else:
         st.success(availability_message)
         st.caption("Coeficientes F-1 y F-4 revisados en 2021/1226. Estos son niveles de POTENCIA por metro de vía, NO niveles de presión en el receptor.")
-    if st.button("Calcular emisión vial por bandas",disabled=not ready,key="nm_cnossos_emission_calculate"):
+    if st.button("Calcular emisión vial por bandas",disabled=(not ready or emission_surface is None),key="nm_cnossos_emission_calculate"):
         try:
             spectra=calculate_road_emission(flow_data,speed,slope,
                                             temperature_c=20.0,
-                                            surface="reference road surface")
+                                            surface=emission_surface)
             st.session_state["nm_cnossos_emission_results"]=spectra
         except Exception as exc:
             st.error(f"No se pudo calcular emisión CNOSSOS-EU: {exc}")
@@ -818,12 +821,13 @@ with tab_road:
                             max_value=1000.0,value=250.0,step=10.0,key="nm_road_segment")
     temperature=c.number_input("Temperatura media anual [°C]",min_value=-10.0,
                             max_value=45.0,value=20.0,step=1.0,key="nm_road_temp")
-    if st.button("Estimar Lden exterior · modelo docente (no normativo)",disabled=not ready,
+    if st.button("Estimar Lden exterior · modelo docente (no normativo)",disabled=(not ready or emission_surface is None),
                  key="nm_road_preliminary_receiver"):
         try:
             estimated=illustrative_free_field_levels(
                 flow_data,speed,distance,height,road_length_m=source_length,
-                slope_percent=slope,temperature_c=temperature)
+                slope_percent=slope,temperature_c=temperature,
+                surface=emission_surface)
             st.session_state["nm_road_preliminary_result"]=estimated
         except Exception as exc:
             st.error(f"No fue posible estimar el receptor: {exc}")
