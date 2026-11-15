@@ -2113,7 +2113,12 @@ function App() {
     const calcReceivers = hasScenarioOverride ? scenarioOverride.receivers : receivers
     const calcBarriers = hasScenarioOverride ? scenarioOverride.barriers : barriers
 
-    if (!calcSources.some(s => s.enabled)) return
+    const hasActivePointSource = calcSources.some(source => source.enabled)
+    const hasActiveRoad = roads.some(road => road.enabled !== false && road.points?.length >= 2)
+    if (!hasActivePointSource && !hasActiveRoad) {
+      alert('Agrega o activa una fuente puntual o un tramo vial antes de calcular el mapa.')
+      return
+    }
 
     const pendingCourseSources = calcSources.filter(
       s => s.enabled && !sourcePowerComplete(s)
